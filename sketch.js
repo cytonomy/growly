@@ -290,6 +290,7 @@ async function ensureMicStarted() {
     micActive = true;
   } catch (e) {
     // permission denied or no mic — stay calm
+    window._growlyMicError = String(e);
   }
 }
 
