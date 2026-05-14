@@ -1,54 +1,111 @@
-// Growly — blue slime idle bounce on a grass field.
+// Growly — blue slime. Idle bounce in place; click to hop toward a target.
 
 const SPRITE_W = 24;
 const SPRITE_H = 24;
 
 const config = {
-  renderScale: 6,
-  fps: 8,
-  bounceAmpPx: 2,
-  bouncePeriodMs: 500,
+  renderScale: 4,
+  bouncePeriodMs: 600,
+  hopDistancePx: 48,    // sprite-pixels per single hop
+  hopDurationMs: 400,
+  hopPeakPx: 14,        // sprite-pixels of vertical lift at apex
+  arrivePx: 2,          // distance threshold to consider target reached
   bgSeed: 1337,
 };
 
-// 0 transparent, 1 base, 2 rim, 3 shadow, 4 deep shadow, 5 specular fleck, 6 eye dot
+// 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye dot
 const PALETTE = {
   1: '#3A8FE8',
   2: '#8FD0FF',
   3: '#1F5BAF',
-  4: '#0C2D6E',
-  5: '#FFFFFF',
   6: '#0A1428',
 };
 
-// Each row is exactly 24 chars; each char is a palette index 0-6.
+// Spherical neutral. 18 wide × 16 tall. Anchored at row 19.
 const F_NEUTRAL = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
+  "000000000022220000000000",
+  "000000000211112000000000",
+  "000000002111111200000000",
+  "000000021111111120000000",
+  "000000211111111112000000",
+  "000002111111111111200000",
+  "000021111111111111112000",
+  "000211116111111611112000",
+  "000211111111111111112000",
+  "000211111111111111112000",
+  "000023333333333333332000",
+  "000002333333333333200000",
+  "000000233333333332000000",
+  "000000023333333320000000",
+  "000000002333333200000000",
+  "000000000022220000000000",
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000222222000000000",
-  "000000022511111220000000",
-  "000002251111111112200000",
-  "000025511111111111120000",
-  "000211511111111111111200",
-  "002111111111111111111200",
-  "002111116111111611111200",
-  "002111111111111111111200",
-  "002111111111111111111200",
-  "002311111111111111133200",
-  "002331111111111111333200",
-  "002333311111111133333200",
-  "002333333111113333334200",
-  "002333333344443333344200",
-  "002222222222222222222200",
   "000000000000000000000000",
 ];
 
+// Mid-stretch — interpolates between NEUTRAL and STRETCH. 16 wide × 17 tall.
+const F_MID_STRETCH = [
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000022220000000000",
+  "000000000211112000000000",
+  "000000002111111200000000",
+  "000000021111111120000000",
+  "000000211111111112000000",
+  "000002111111111111200000",
+  "000021111111111111112000",
+  "000021116111111611112000",
+  "000021111111111111112000",
+  "000021111111111111112000",
+  "000021111111111111112000",
+  "000002333333333333200000",
+  "000000233333333332000000",
+  "000000023333333320000000",
+  "000000002333333200000000",
+  "000000000233332000000000",
+  "000000000022220000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+];
+
+// Stretched. 14 wide × 18 tall.
+const F_STRETCH = [
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000022220000000000",
+  "000000000211112000000000",
+  "000000002111111200000000",
+  "000000021111111120000000",
+  "000000211111111112000000",
+  "000002111111111111200000",
+  "000002111111111111200000",
+  "000002111111111111200000",
+  "000002116111111611200000",
+  "000002111111111111200000",
+  "000002111111111111200000",
+  "000002333333333333200000",
+  "000002333333333333200000",
+  "000000233333333332000000",
+  "000000023333333320000000",
+  "000000002333333200000000",
+  "000000000233332000000000",
+  "000000000022220000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+];
+
+// Squashed. 20 wide × 12 tall.
 const F_SQUASH = [
   "000000000000000000000000",
   "000000000000000000000000",
@@ -58,58 +115,34 @@ const F_SQUASH = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
-  "000000000000000000000000",
-  "000000002222222200000000",
-  "000000225111111122000000",
-  "000022511111111111220000",
-  "000215511111111111112000",
-  "002111111111111111111200",
+  "000000000022220000000000",
+  "000000002111111200000000",
+  "000000211111111112000000",
+  "000021111111111111112000",
   "002111116111111611111200",
   "002111111111111111111200",
-  "002111111111111111111200",
-  "002311111111111111133200",
-  "002331111111111111333200",
-  "002333311111111133333200",
-  "002333333111113333334200",
-  "002333333344443333344200",
-  "002222222222222222222200",
+  "002333333333333333333200",
+  "002333333333333333333200",
+  "000023333333333333332000",
+  "000000233333333332000000",
+  "000000002333333200000000",
+  "000000000022220000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
   "000000000000000000000000",
 ];
 
-const F_STRETCH = [
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000222222000000000",
-  "000000022211111220000000",
-  "000000022511111122000000",
-  "000002251111111111200000",
-  "000025511111111111120000",
-  "000211511111111111111200",
-  "002111111111111111111200",
-  "002111111111111111111200",
-  "002111116111111611111200",
-  "002111111111111111111200",
-  "002111111111111111111200",
-  "002311111111111111133200",
-  "002331111111111111333200",
-  "002333311111111133333200",
-  "002333333111113333334200",
-  "002333333344443333344200",
-  "002222222222222222222200",
-  "000000000000000000000000",
-];
-
-const FRAMES = [F_NEUTRAL, F_SQUASH, F_NEUTRAL, F_STRETCH];
+// Idle phase order: neutral → stretch → neutral → squash.
+const IDLE_FRAMES = [F_NEUTRAL, F_STRETCH, F_NEUTRAL, F_SQUASH];
 
 const slime = {
-  x: 0,
-  y: 0,
-  frameIdx: 0,
-  lastFrameSwap: 0,
+  x: 0, y: 0,
+  targetX: 0, targetY: 0,
+  hopFromX: 0, hopFromY: 0,
+  hopToX: 0, hopToY: 0,
+  hopStartMs: 0,
+  isHopping: false,
 };
 
 let bgBuffer = null;
@@ -123,28 +156,73 @@ function setup() {
   startMs = millis();
   slime.x = width / 2;
   slime.y = height / 2;
+  slime.targetX = slime.x;
+  slime.targetY = slime.y;
   rebuildBackground();
 }
 
 function draw() {
   image(bgBuffer, 0, 0);
 
-  const now = millis();
-  const frameDurMs = 1000 / config.fps;
-  if (now - slime.lastFrameSwap >= frameDurMs) {
-    slime.frameIdx = (slime.frameIdx + 1) % FRAMES.length;
-    slime.lastFrameSwap = now;
+  updateSlime();
+
+  let renderX = slime.x;
+  let renderY = slime.y;
+  let frame;
+
+  if (slime.isHopping) {
+    const t = (millis() - slime.hopStartMs) / config.hopDurationMs;
+    // Parabolic lift: 0 at takeoff and landing, max at apex.
+    const lift = Math.sin(t * Math.PI) * config.hopPeakPx * config.renderScale;
+    renderX = lerp(slime.hopFromX, slime.hopToX, t);
+    renderY = lerp(slime.hopFromY, slime.hopToY, t) - lift;
+    frame = hopFrameAt(t);
+  } else {
+    const phase = ((millis() - startMs) % config.bouncePeriodMs) / config.bouncePeriodMs;
+    const idx = Math.floor(phase * IDLE_FRAMES.length) % IDLE_FRAMES.length;
+    frame = IDLE_FRAMES[idx];
   }
 
-  const t = (now - startMs) / config.bouncePeriodMs;
-  const yOffsetPx = Math.sin(t * Math.PI * 2) * config.bounceAmpPx;
-
-  drawSlime(slime.x, slime.y + yOffsetPx * config.renderScale);
+  drawSlime(renderX, renderY, frame);
 }
 
-function drawSlime(cx, cy) {
+function hopFrameAt(t) {
+  // Anticipation crouch → launch tween → airborne peak → descent tween → impact crouch.
+  if (t < 0.10) return F_SQUASH;
+  if (t < 0.22) return F_MID_STRETCH;
+  if (t < 0.78) return F_STRETCH;
+  if (t < 0.90) return F_MID_STRETCH;
+  return F_SQUASH;
+}
+
+function updateSlime() {
+  if (slime.isHopping) {
+    const elapsed = millis() - slime.hopStartMs;
+    if (elapsed >= config.hopDurationMs) {
+      slime.x = slime.hopToX;
+      slime.y = slime.hopToY;
+      slime.isHopping = false;
+    }
+    return;
+  }
+
+  const dx = slime.targetX - slime.x;
+  const dy = slime.targetY - slime.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist < config.arrivePx) return;
+
+  const reach = config.hopDistancePx * config.renderScale;
+  const ratio = Math.min(1, reach / dist);
+  slime.hopFromX = slime.x;
+  slime.hopFromY = slime.y;
+  slime.hopToX = slime.x + dx * ratio;
+  slime.hopToY = slime.y + dy * ratio;
+  slime.hopStartMs = millis();
+  slime.isHopping = true;
+}
+
+function drawSlime(cx, cy, frame) {
   const s = config.renderScale;
-  const frame = FRAMES[slime.frameIdx];
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
   const oy = Math.round(cy - (SPRITE_H * s) / 2);
 
@@ -157,6 +235,11 @@ function drawSlime(cx, cy) {
       rect(ox + x * s, oy + y * s, s, s);
     }
   }
+}
+
+function mousePressed() {
+  slime.targetX = mouseX;
+  slime.targetY = mouseY;
 }
 
 function rebuildBackground() {
@@ -206,5 +289,7 @@ function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   slime.x = width / 2;
   slime.y = height / 2;
+  slime.targetX = slime.x;
+  slime.targetY = slime.y;
   rebuildBackground();
 }
