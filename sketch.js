@@ -20,11 +20,14 @@ const config = {
 // across the rainbow (blue → cyan → green → yellow → orange → red).
 // 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye dot
 function paletteForHue(h) {
+  // p5's color() parses 'hsl(220, 78%, 55%)' correctly but silently returns
+  // white for 'hsl(220.32, 78%, 55%)' — round the hue to an integer.
+  const hi = Math.round(h);
   return {
-    1: color(`hsl(${h}, 78%, 55%)`),
-    2: color(`hsl(${h}, 92%, 80%)`),
-    3: color(`hsl(${h}, 75%, 35%)`),
-    6: color(`hsl(${h}, 55%, 12%)`),
+    1: color(`hsl(${hi}, 78%, 55%)`),
+    2: color(`hsl(${hi}, 92%, 80%)`),
+    3: color(`hsl(${hi}, 75%, 35%)`),
+    6: color(`hsl(${hi}, 55%, 12%)`),
   };
 }
 
