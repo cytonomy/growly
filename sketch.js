@@ -1,6 +1,9 @@
-// Growly — pixel-art slime. Click/tap to hop. Idle bounce period and vertical
-// amplitude both react to mic level. Hue cycles the full rainbow continuously;
-// loud music speeds the cycle. All knobs live in config.js (window.GROWLY_CONFIG).
+// Growly — pixel-art slime. Click/tap to hop.
+// Audio reactivity:
+//   - dominant pitch (spectral centroid)  → hue on the rainbow
+//   - detected BPM (bass-band onsets)     → bounce period (one bounce per beat)
+//   - intensity (RMS)                     → bounce amplitude (vertical lift)
+// All knobs live in config.js (window.GROWLY_CONFIG).
 
 const cfg = window.GROWLY_CONFIG;
 
@@ -146,14 +149,19 @@ const slime = {
 let bgBuffer = null;
 let startMs = 0;
 let lastDrawMs = 0;
-let bouncePhase = 0;       // 0..1, integrates over time at the current bounce period
-let hueOffset = 0;         // 0..360, rotates continuously
+let bouncePhase = 0;        // 0..1, integrates over time at the current bounce period
+let smoothedPitchHue = 0;   // smoothed mapping of dominant pitch → hue (deg)
+let detectedBpm = 0;        // smoothed estimate from beat-tracking
+let energyHistory = [];     // recent bass-band energies for onset detection
+let lastBeatMs = 0;
+let beatIntervals = [];     // recent inter-beat intervals (ms)
 let audioCtx = null;
 let micStream = null;
 let micAnalyser = null;
-let micBuffer = null;
+let micBuffer = null;       // time-domain (RMS)
+let freqBuf = null;         // frequency-domain (centroid + beat)
 let micActive = false;
-let smoothedLevel = 0;
+let smoothedLevel = 0;      // intensity
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -162,7 +170,8 @@ function setup() {
   noStroke();
   startMs = millis();
   lastDrawMs = startMs;
-  hueOffset = cfg.hueStart;
+  smoothedPitchHue = cfg.hueFallback;
+  detectedBpm = cfg.bpmFallback;
   slime.x = width / 2;
   slime.y = height / 2;
   slime.targetX = slime.x;
@@ -283,11 +292,13 @@ async function ensureMicStarted() {
     if (audioCtx.state !== 'running') await audioCtx.resume();
     const src = audioCtx.createMediaStreamSource(stream);
     const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 1024;
+    analyser.fftSize = cfg.fftSize;
+    analyser.smoothingTimeConstant = 0.3;
     src.connect(analyser);
     micStream = stream;
     micAnalyser = analyser;
     micBuffer = new Float32Array(analyser.fftSize);
+    freqBuf = new Uint8Array(analyser.frequencyBinCount);
     micActive = true;
   } catch (e) {
     // permission denied or no mic — stay calm

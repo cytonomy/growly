@@ -4,30 +4,41 @@ window.GROWLY_CONFIG = {
   renderScale: 4,
   bgSeed: 1337,
 
-  // ----- Idle bounce -----
-  // Period and vertical amplitude both lerp from "calm" → "loud" with smoothed mic level.
-  bounceCalmPeriodMs: 700,    // slow, gentle when quiet
-  bounceLoudPeriodMs: 180,    // fast when the music is hot
-  bounceCalmAmpPx: 0,         // sprite-pixels of vertical lift at apex when quiet
-  bounceLoudAmpPx: 10,        // sprite-pixels of lift at apex when loud
-
   // ----- Hop (click / tap to move) -----
-  hopDistancePx: 48,          // sprite-pixels per single hop
+  hopDistancePx: 48,
   hopDurationMs: 400,
-  hopPeakPx: 14,              // arc height at midpoint
-  arrivePx: 2,                // stop once within this distance of target
+  hopPeakPx: 14,
+  arrivePx: 2,
 
   // ----- Mic input -----
-  micGain: 12,                // raw mic RMS is small (0.02–0.15); scale up before clamp
-  micSmoothing: 0.08,         // 0 = no movement, 1 = instant. Lower = smoother falloff.
+  micGain: 12,                  // raw mic RMS is small (0.02–0.15); scale up before clamp
+  micSmoothing: 0.08,           // intensity EMA factor; lower = smoother
+  fftSize: 2048,                // FFT bin count — bigger = better frequency resolution
 
-  // ----- Rainbow hue cycling (LED-style — always rotating) -----
-  hueBaseSpeedDegPerSec: 12,    // ~30 s per full rainbow when silent
-  hueBoostSpeedDegPerSec: 110,  // ~3 s per full rainbow at peak mic level
-  hueStart: 240,                // starting hue (degrees) on page load
+  // ----- Pitch → hue (dominant frequency in the music drives the rainbow position) -----
+  pitchMinHz: 80,               // bottom of musical range
+  pitchMaxHz: 5000,             // top of musical range
+  pitchHueRange: 300,           // pitch maps log-scale to [0°, this°] hue
+  pitchSmoothing: 0.08,         // smoother to avoid color flicker
+  hueFallback: 220,             // hue (degrees) when there's no audio
+  intensityThreshold: 0.02,     // below this RMS, treat as silence
+
+  // ----- BPM → bounce period (one bounce per beat) -----
+  // Beat detection: bass-band onset peaks above local average.
+  beatBandMinHz: 60,            // bass band low edge
+  beatBandMaxHz: 200,           // bass band high edge
+  beatThresholdRatio: 1.45,     // current bass energy must exceed avg * this to register
+  beatMinIntervalMs: 250,       // ignore beats faster than this (~240 BPM ceiling)
+  beatTimeoutMs: 3000,          // reset to fallback after this many ms with no beats
+  bpmFallback: 75,              // default BPM when no music
+  bpmMin: 50,
+  bpmMax: 180,
+
+  // ----- Bounce vertical amplitude (intensity drives deformation magnitude) -----
+  bounceMinAmpPx: 1,            // sprite-pixels of lift when silent
+  bounceMaxAmpPx: 14,           // sprite-pixels of lift at peak intensity
 
   // ----- Palette (HSL components per palette index) -----
-  // Hue is set per-frame from the rotator above; sat/lightness stay fixed per role.
   bodySaturation: 78,    bodyLightness: 55,    // idx 1 — main body
   rimSaturation: 92,     rimLightness: 80,     // idx 2 — bright outline
   shadowSaturation: 75,  shadowLightness: 35,  // idx 3 — interior shadow band
