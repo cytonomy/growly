@@ -238,8 +238,18 @@ function drawSlime(cx, cy, frame) {
 }
 
 function mousePressed() {
-  slime.targetX = mouseX;
-  slime.targetY = mouseY;
+  setTarget(mouseX, mouseY);
+  return false;
+}
+
+function touchStarted() {
+  setTarget(mouseX, mouseY);
+  return false;
+}
+
+function setTarget(x, y) {
+  slime.targetX = x;
+  slime.targetY = y;
 }
 
 function rebuildBackground() {

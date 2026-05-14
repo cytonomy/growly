@@ -5,8 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Growly</title>
   <style>
-    html, body { margin: 0; padding: 0; overflow: hidden; background: #111; }
-    canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+    html, body {
+      margin: 0; padding: 0; overflow: hidden; background: #111;
+      touch-action: none;
+      overscroll-behavior: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      touch-action: none;
+    }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 </head>
