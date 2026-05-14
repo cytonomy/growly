@@ -174,7 +174,9 @@ function draw() {
   image(bgBuffer, 0, 0);
 
   const now = millis();
-  const dt = now - lastDrawMs;
+  // Clamp dt — first frame after setup or backgrounded tab can otherwise produce
+  // a multi-second delta that lurches hue/bounce phase forward.
+  const dt = Math.min(100, now - lastDrawMs);
   lastDrawMs = now;
 
   // Mic: smooth toward a gain-scaled, clamped target.
