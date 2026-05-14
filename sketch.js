@@ -1,4 +1,5 @@
-// Growly — blue slime. Idle bounce in place; click to hop toward a target.
+// Growly — blue slime. Idle bounce in place; click/tap to hop. Color shifts
+// red when the mic is louder, blue when it's quiet (smoothed).
 
 const SPRITE_W = 24;
 const SPRITE_H = 24;
@@ -9,91 +10,45 @@ const config = {
   hopDistancePx: 48,    // sprite-pixels per single hop
   hopDurationMs: 400,
   hopPeakPx: 14,        // sprite-pixels of vertical lift at apex
-  arrivePx: 2,          // distance threshold to consider target reached
+  arrivePx: 2,
+  micGain: 4,           // raw amplitude is small, multiply before clamping
+  micSmoothing: 0.2,    // 0=no movement, 1=instant; slight smoothing
   bgSeed: 1337,
 };
 
+// Two endpoints for the slime palette — lerped per-frame by mic level.
 // 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye dot
-const PALETTE = {
+const PALETTE_CALM = {
   1: '#3A8FE8',
   2: '#8FD0FF',
   3: '#1F5BAF',
   6: '#0A1428',
 };
+const PALETTE_LOUD = {
+  1: '#DC3232',
+  2: '#FF9191',
+  3: '#962020',
+  6: '#280505',
+};
 
-// Spherical neutral. 18 wide × 16 tall. Anchored at row 19.
+// Rounder, slightly smaller blob: 14 wide × 14 tall (was 18 × 16).
+// Anchored bottom at row 19 across all frames.
 const F_NEUTRAL = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
   "000000000022220000000000",
-  "000000000211112000000000",
   "000000002111111200000000",
   "000000021111111120000000",
   "000000211111111112000000",
-  "000002111111111111200000",
-  "000021111111111111112000",
-  "000211116111111611112000",
-  "000211111111111111112000",
-  "000211111111111111112000",
-  "000023333333333333332000",
-  "000002333333333333200000",
-  "000000233333333332000000",
-  "000000023333333320000000",
-  "000000002333333200000000",
-  "000000000022220000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-];
-
-// Mid-stretch — interpolates between NEUTRAL and STRETCH. 16 wide × 17 tall.
-const F_MID_STRETCH = [
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000022220000000000",
-  "000000000211112000000000",
-  "000000002111111200000000",
-  "000000021111111120000000",
-  "000000211111111112000000",
-  "000002111111111111200000",
-  "000021111111111111112000",
-  "000021116111111611112000",
-  "000021111111111111112000",
-  "000021111111111111112000",
-  "000021111111111111112000",
-  "000002333333333333200000",
-  "000000233333333332000000",
-  "000000023333333320000000",
-  "000000002333333200000000",
-  "000000000233332000000000",
-  "000000000022220000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-];
-
-// Stretched. 14 wide × 18 tall.
-const F_STRETCH = [
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000022220000000000",
-  "000000000211112000000000",
-  "000000002111111200000000",
-  "000000021111111120000000",
-  "000000211111111112000000",
-  "000002111111111111200000",
-  "000002111111111111200000",
   "000002111111111111200000",
   "000002116111111611200000",
   "000002111111111111200000",
   "000002111111111111200000",
   "000002333333333333200000",
-  "000002333333333333200000",
   "000000233333333332000000",
   "000000023333333320000000",
   "000000002333333200000000",
@@ -105,7 +60,63 @@ const F_STRETCH = [
   "000000000000000000000000",
 ];
 
-// Squashed. 20 wide × 12 tall.
+// Mid-stretch — between neutral and stretch. 12 wide × 15 tall.
+const F_MID_STRETCH = [
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000022220000000000",
+  "000000002111111200000000",
+  "000000021111111120000000",
+  "000000211111111112000000",
+  "000000211111111112000000",
+  "000000211111111112000000",
+  "000000216111111612000000",
+  "000000211111111112000000",
+  "000000233333333332000000",
+  "000000233333333332000000",
+  "000000023333333320000000",
+  "000000002333333200000000",
+  "000000000233332000000000",
+  "000000000023320000000000",
+  "000000000022220000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+];
+
+// Stretched. 10 wide × 16 tall.
+const F_STRETCH = [
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000022220000000000",
+  "000000002111111200000000",
+  "000000021111111120000000",
+  "000000021111111120000000",
+  "000000021111111120000000",
+  "000000021111111120000000",
+  "000000026111111620000000",
+  "000000021111111120000000",
+  "000000021111111120000000",
+  "000000023333333320000000",
+  "000000023333333320000000",
+  "000000023333333320000000",
+  "000000002333333200000000",
+  "000000000233332000000000",
+  "000000000023320000000000",
+  "000000000022220000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
+];
+
+// Squashed. 16 wide × 10 tall.
 const F_SQUASH = [
   "000000000000000000000000",
   "000000000000000000000000",
@@ -115,15 +126,15 @@ const F_SQUASH = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
+  "000000000000000000000000",
+  "000000000000000000000000",
   "000000000022220000000000",
-  "000000002111111200000000",
-  "000000211111111112000000",
+  "000000021111111120000000",
+  "000002116111111611200000",
   "000021111111111111112000",
-  "002111116111111611111200",
-  "002111111111111111111200",
-  "002333333333333333333200",
-  "002333333333333333333200",
   "000023333333333333332000",
+  "000023333333333333332000",
+  "000002333333333333200000",
   "000000233333333332000000",
   "000000002333333200000000",
   "000000000022220000000000",
@@ -133,7 +144,6 @@ const F_SQUASH = [
   "000000000000000000000000",
 ];
 
-// Idle phase order: neutral → stretch → neutral → squash.
 const IDLE_FRAMES = [F_NEUTRAL, F_STRETCH, F_NEUTRAL, F_SQUASH];
 
 const slime = {
@@ -147,6 +157,10 @@ const slime = {
 
 let bgBuffer = null;
 let startMs = 0;
+let mic = null;
+let micAnalyzer = null;
+let micActive = false;
+let smoothedLevel = 0;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -159,10 +173,22 @@ function setup() {
   slime.targetX = slime.x;
   slime.targetY = slime.y;
   rebuildBackground();
+
+  // Audio objects created here; actual mic.start() happens on first user gesture.
+  mic = new p5.AudioIn();
+  micAnalyzer = new p5.Amplitude();
+  micAnalyzer.setInput(mic);
 }
 
 function draw() {
   image(bgBuffer, 0, 0);
+
+  // Smooth mic amplitude toward a clamped, gained target.
+  const rawLevel = micActive ? micAnalyzer.getLevel() : 0;
+  const targetLevel = Math.min(1, rawLevel * config.micGain);
+  smoothedLevel += (targetLevel - smoothedLevel) * config.micSmoothing;
+
+  const palette = lerpPalette(smoothedLevel);
 
   updateSlime();
 
@@ -172,7 +198,6 @@ function draw() {
 
   if (slime.isHopping) {
     const t = (millis() - slime.hopStartMs) / config.hopDurationMs;
-    // Parabolic lift: 0 at takeoff and landing, max at apex.
     const lift = Math.sin(t * Math.PI) * config.hopPeakPx * config.renderScale;
     renderX = lerp(slime.hopFromX, slime.hopToX, t);
     renderY = lerp(slime.hopFromY, slime.hopToY, t) - lift;
@@ -183,11 +208,18 @@ function draw() {
     frame = IDLE_FRAMES[idx];
   }
 
-  drawSlime(renderX, renderY, frame);
+  drawSlime(renderX, renderY, frame, palette);
+}
+
+function lerpPalette(t) {
+  const out = {};
+  for (const k of Object.keys(PALETTE_CALM)) {
+    out[k] = lerpColor(color(PALETTE_CALM[k]), color(PALETTE_LOUD[k]), t);
+  }
+  return out;
 }
 
 function hopFrameAt(t) {
-  // Anticipation crouch → launch tween → airborne peak → descent tween → impact crouch.
   if (t < 0.10) return F_SQUASH;
   if (t < 0.22) return F_MID_STRETCH;
   if (t < 0.78) return F_STRETCH;
@@ -197,8 +229,7 @@ function hopFrameAt(t) {
 
 function updateSlime() {
   if (slime.isHopping) {
-    const elapsed = millis() - slime.hopStartMs;
-    if (elapsed >= config.hopDurationMs) {
+    if (millis() - slime.hopStartMs >= config.hopDurationMs) {
       slime.x = slime.hopToX;
       slime.y = slime.hopToY;
       slime.isHopping = false;
@@ -221,7 +252,7 @@ function updateSlime() {
   slime.isHopping = true;
 }
 
-function drawSlime(cx, cy, frame) {
+function drawSlime(cx, cy, frame, palette) {
   const s = config.renderScale;
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
   const oy = Math.round(cy - (SPRITE_H * s) / 2);
@@ -231,18 +262,29 @@ function drawSlime(cx, cy, frame) {
     for (let x = 0; x < SPRITE_W; x++) {
       const idx = row.charCodeAt(x) - 48;
       if (idx === 0) continue;
-      fill(PALETTE[idx]);
+      fill(palette[idx]);
       rect(ox + x * s, oy + y * s, s, s);
     }
   }
 }
 
+function ensureMicStarted() {
+  if (micActive) return;
+  userStartAudio();
+  mic.start(
+    () => { micActive = true; },
+    () => { /* mic denied or unavailable; stay blue */ }
+  );
+}
+
 function mousePressed() {
+  ensureMicStarted();
   setTarget(mouseX, mouseY);
   return false;
 }
 
 function touchStarted() {
+  ensureMicStarted();
   setTarget(mouseX, mouseY);
   return false;
 }
