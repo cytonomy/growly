@@ -11,25 +11,22 @@ const config = {
   hopDurationMs: 400,
   hopPeakPx: 14,        // sprite-pixels of vertical lift at apex
   arrivePx: 2,
-  micGain: 8,           // raw amplitude is small, multiply before clamping
-  micSmoothing: 0.3,    // 0=no movement, 1=instant; slight smoothing
+  micGain: 12,          // raw amplitude is small, multiply before clamping
+  micSmoothing: 0.08,   // 0=no movement, 1=instant; gentler smoothing
   bgSeed: 1337,
 };
 
-// Two endpoints for the slime palette — lerped per-frame by mic level.
+// Palette derived from a single hue per frame — mic level rotates the hue
+// across the rainbow (blue → cyan → green → yellow → orange → red).
 // 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye dot
-const PALETTE_CALM = {
-  1: '#3A8FE8',
-  2: '#8FD0FF',
-  3: '#1F5BAF',
-  6: '#0A1428',
-};
-const PALETTE_LOUD = {
-  1: '#DC3232',
-  2: '#FF9191',
-  3: '#962020',
-  6: '#280505',
-};
+function paletteForHue(h) {
+  return {
+    1: color(`hsl(${h}, 78%, 55%)`),
+    2: color(`hsl(${h}, 92%, 80%)`),
+    3: color(`hsl(${h}, 75%, 35%)`),
+    6: color(`hsl(${h}, 55%, 12%)`),
+  };
+}
 
 // Rounder, slightly smaller blob: 14 wide × 14 tall (was 18 × 16).
 // Anchored bottom at row 19 across all frames.
@@ -185,7 +182,9 @@ function draw() {
   const targetLevel = Math.min(1, rawLevel * config.micGain);
   smoothedLevel += (targetLevel - smoothedLevel) * config.micSmoothing;
 
-  const palette = lerpPalette(smoothedLevel);
+  // Quiet → 240° (blue). Loud → 0° (red). Smooth traversal of full rainbow.
+  const hue = 240 - smoothedLevel * 240;
+  const palette = paletteForHue(hue);
 
   updateSlime();
 
@@ -206,14 +205,6 @@ function draw() {
   }
 
   drawSlime(renderX, renderY, frame, palette);
-}
-
-function lerpPalette(t) {
-  const out = {};
-  for (const k of Object.keys(PALETTE_CALM)) {
-    out[k] = lerpColor(color(PALETTE_CALM[k]), color(PALETTE_LOUD[k]), t);
-  }
-  return out;
 }
 
 function hopFrameAt(t) {
