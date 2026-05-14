@@ -240,6 +240,30 @@ function draw() {
   }
 
   drawSlime(renderX, renderY, frame, palette);
+
+  if (cfg.showHud) drawHud();
+}
+
+function drawHud() {
+  const lines = [
+    `BPM   ${micActive ? Math.round(detectedBpm) : '—'}`,
+    `pitch ${Math.round(smoothedPitchHue)}°`,
+    `level ${(smoothedLevel * 100).toFixed(0)}%`,
+    `odf   ${odfSampleCount}/${cfg.odfBufferSize}`,
+    `fps   ${(1000 / avgAnalysisDt).toFixed(0)}`,
+  ];
+  push();
+  textFont('monospace');
+  textSize(14);
+  textAlign(LEFT, TOP);
+  // Backdrop
+  fill(0, 0, 0, 160);
+  rect(8, 8, 130, 18 * lines.length + 10);
+  fill(255);
+  for (let i = 0; i < lines.length; i++) {
+    text(lines[i], 14, 14 + i * 18);
+  }
+  pop();
 }
 
 // Pitch (spectral centroid → hue) and BPM (ODF + autocorrelation → tempo).

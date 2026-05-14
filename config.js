@@ -39,6 +39,9 @@ window.GROWLY_CONFIG = {
   bounceMinAmpPx: 1,            // sprite-pixels of lift when silent
   bounceMaxAmpPx: 14,           // sprite-pixels of lift at peak intensity
 
+  // ----- Debug overlay -----
+  showHud: true,                // top-left readout: detected BPM, pitch hue, intensity, fps
+
   // ----- Palette (HSL per palette index) -----
   bodySaturation: 78,    bodyLightness: 55,
   rimSaturation: 92,     rimLightness: 80,
