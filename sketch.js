@@ -188,15 +188,16 @@ function draw() {
   const dt = Math.min(100, now - lastDrawMs);
   lastDrawMs = now;
 
-  // Mic: smooth toward a gain-scaled, clamped target.
+  // Intensity: smooth raw mic RMS into [0..1].
   const rawLevel = readMicRms();
   const targetLevel = Math.min(1, rawLevel * cfg.micGain);
   smoothedLevel += (targetLevel - smoothedLevel) * cfg.micSmoothing;
+  const intensity = smoothedLevel;
 
-  // Hue rotates continuously; speed is base + mic-boosted.
-  const hueSpeedDps = cfg.hueBaseSpeedDegPerSec + smoothedLevel * cfg.hueBoostSpeedDegPerSec;
-  hueOffset = (hueOffset + hueSpeedDps * dt / 1000) % 360;
-  const palette = paletteForHue(hueOffset);
+  // Pitch + beat analysis from FFT (updates smoothedPitchHue + detectedBpm).
+  analyzeSpectrum(now);
+
+  const palette = paletteForHue(smoothedPitchHue);
 
   updateSlime(now);
 
@@ -211,9 +212,10 @@ function draw() {
     renderY = lerp(slime.hopFromY, slime.hopToY, t) - lift;
     frame = hopFrameAt(t);
   } else {
-    // Idle bounce: period and amplitude both lerp with mic level.
-    const period = lerp(cfg.bounceCalmPeriodMs, cfg.bounceLoudPeriodMs, smoothedLevel);
-    const ampPx  = lerp(cfg.bounceCalmAmpPx,    cfg.bounceLoudAmpPx,    smoothedLevel);
+    // Idle bounce: BPM → period (one bounce per beat), intensity → vertical lift.
+    const bpm = intensity > cfg.intensityThreshold ? detectedBpm : cfg.bpmFallback;
+    const period = 60000 / bpm;
+    const ampPx = lerp(cfg.bounceMinAmpPx, cfg.bounceMaxAmpPx, intensity);
     bouncePhase = (bouncePhase + dt / period) % 1;
     const idx = Math.floor(bouncePhase * IDLE_FRAMES.length) % IDLE_FRAMES.length;
     frame = IDLE_FRAMES[idx];
@@ -224,6 +226,73 @@ function draw() {
   }
 
   drawSlime(renderX, renderY, frame, palette);
+}
+
+// Compute dominant pitch (spectral centroid → hue) and detect beats (bass-band onsets → BPM).
+function analyzeSpectrum(now) {
+  if (!micAnalyser || !audioCtx) return;
+  const binCount = micAnalyser.frequencyBinCount;
+  if (!freqBuf || freqBuf.length !== binCount) {
+    freqBuf = new Uint8Array(binCount);
+  }
+  micAnalyser.getByteFrequencyData(freqBuf);
+
+  const sampleRate = audioCtx.sampleRate;
+  const fftSize = micAnalyser.fftSize;
+  const binHz = sampleRate / fftSize;
+
+  // Pitch: magnitude-weighted mean frequency across the musical range, log-mapped to hue.
+  const pitchLow = Math.max(1, Math.ceil(cfg.pitchMinHz / binHz));
+  const pitchHigh = Math.min(binCount - 1, Math.floor(cfg.pitchMaxHz / binHz));
+  let weightedSum = 0, totalMag = 0;
+  for (let i = pitchLow; i <= pitchHigh; i++) {
+    const m = freqBuf[i];
+    weightedSum += i * m;
+    totalMag += m;
+  }
+  let targetHue = cfg.hueFallback;
+  if (totalMag > 0 && smoothedLevel >= cfg.intensityThreshold) {
+    const meanBin = weightedSum / totalMag;
+    const pitchHz = meanBin * binHz;
+    const logMin = Math.log(cfg.pitchMinHz);
+    const logMax = Math.log(cfg.pitchMaxHz);
+    const clamped = Math.max(cfg.pitchMinHz, Math.min(cfg.pitchMaxHz, pitchHz));
+    const t = (Math.log(clamped) - logMin) / (logMax - logMin);
+    targetHue = t * cfg.pitchHueRange;
+  }
+  smoothedPitchHue += (targetHue - smoothedPitchHue) * cfg.pitchSmoothing;
+
+  // Beat detection from bass-band onset peaks.
+  const bassLow = Math.max(1, Math.ceil(cfg.beatBandMinHz / binHz));
+  const bassHigh = Math.min(binCount - 1, Math.floor(cfg.beatBandMaxHz / binHz));
+  let bassEnergy = 0;
+  for (let i = bassLow; i <= bassHigh; i++) bassEnergy += freqBuf[i];
+
+  energyHistory.push(bassEnergy);
+  if (energyHistory.length > 60) energyHistory.shift();
+
+  if (energyHistory.length >= 15 && smoothedLevel >= cfg.intensityThreshold) {
+    let sum = 0;
+    for (let i = 0; i < energyHistory.length; i++) sum += energyHistory[i];
+    const avg = sum / energyHistory.length;
+    const refractoryOk = (now - lastBeatMs) > cfg.beatMinIntervalMs;
+    if (bassEnergy > avg * cfg.beatThresholdRatio && refractoryOk) {
+      if (lastBeatMs > 0) {
+        const interval = now - lastBeatMs;
+        beatIntervals.push(interval);
+        if (beatIntervals.length > 8) beatIntervals.shift();
+        const sorted = beatIntervals.slice().sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        const bpm = 60000 / median;
+        detectedBpm = Math.max(cfg.bpmMin, Math.min(cfg.bpmMax, bpm));
+      }
+      lastBeatMs = now;
+    }
+  }
+  if (now - lastBeatMs > cfg.beatTimeoutMs) {
+    detectedBpm = cfg.bpmFallback;
+    beatIntervals.length = 0;
+  }
 }
 
 function hopFrameAt(t) {
