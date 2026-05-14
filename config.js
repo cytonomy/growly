@@ -13,34 +13,35 @@ window.GROWLY_CONFIG = {
   // ----- Mic input -----
   micGain: 12,                  // raw mic RMS is small (0.02–0.15); scale up before clamp
   micSmoothing: 0.08,           // intensity EMA factor; lower = smoother
-  fftSize: 2048,                // FFT bin count — bigger = better frequency resolution
+  fftSize: 2048,                // FFT bin count
 
-  // ----- Pitch → hue (dominant frequency in the music drives the rainbow position) -----
-  pitchMinHz: 80,               // bottom of musical range
+  // ----- Pitch → hue (dominant frequency drives rainbow position) -----
+  pitchMinHz: 80,               // bottom of musical range used for centroid
   pitchMaxHz: 5000,             // top of musical range
   pitchHueRange: 300,           // pitch maps log-scale to [0°, this°] hue
   pitchSmoothing: 0.08,         // smoother to avoid color flicker
-  hueFallback: 220,             // hue (degrees) when there's no audio
+  hueFallback: 220,             // hue (deg) when there's no audio
   intensityThreshold: 0.02,     // below this RMS, treat as silence
 
-  // ----- BPM → bounce period (one bounce per beat) -----
-  // Beat detection: bass-band onset peaks above local average.
-  beatBandMinHz: 60,            // bass band low edge
-  beatBandMaxHz: 200,           // bass band high edge
-  beatThresholdRatio: 1.45,     // current bass energy must exceed avg * this to register
-  beatMinIntervalMs: 250,       // ignore beats faster than this (~240 BPM ceiling)
-  beatTimeoutMs: 3000,          // reset to fallback after this many ms with no beats
-  bpmFallback: 75,              // default BPM when no music
+  // ----- BPM via spectral-flux autocorrelation -----
+  // ODF (onset detection function) = spectral flux over this freq range.
+  odfFreqMinHz: 60,
+  odfFreqMaxHz: 4000,
+  odfBufferSize: 256,           // ~4 sec of recent onset strength at 60 Hz analysis
+  bpmEstimateIntervalMs: 500,   // re-run autocorrelation this often
+  bpmSmoothing: 0.20,           // EMA factor on detected BPM — lower = slower lock
+  bpmIdleResetMs: 4000,         // reset to fallback after this many ms of silence
+  bpmFallback: 75,
   bpmMin: 50,
   bpmMax: 180,
 
-  // ----- Bounce vertical amplitude (intensity drives deformation magnitude) -----
+  // ----- Bounce vertical amplitude (intensity-driven) -----
   bounceMinAmpPx: 1,            // sprite-pixels of lift when silent
   bounceMaxAmpPx: 14,           // sprite-pixels of lift at peak intensity
 
-  // ----- Palette (HSL components per palette index) -----
-  bodySaturation: 78,    bodyLightness: 55,    // idx 1 — main body
-  rimSaturation: 92,     rimLightness: 80,     // idx 2 — bright outline
-  shadowSaturation: 75,  shadowLightness: 35,  // idx 3 — interior shadow band
-  eyeSaturation: 55,     eyeLightness: 12,     // idx 6 — eye dot
+  // ----- Palette (HSL per palette index) -----
+  bodySaturation: 78,    bodyLightness: 55,
+  rimSaturation: 92,     rimLightness: 80,
+  shadowSaturation: 75,  shadowLightness: 35,
+  eyeSaturation: 55,     eyeLightness: 12,
 };

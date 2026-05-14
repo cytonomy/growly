@@ -149,19 +149,25 @@ const slime = {
 let bgBuffer = null;
 let startMs = 0;
 let lastDrawMs = 0;
-let bouncePhase = 0;        // 0..1, integrates over time at the current bounce period
-let smoothedPitchHue = 0;   // smoothed mapping of dominant pitch → hue (deg)
-let detectedBpm = 0;        // smoothed estimate from beat-tracking
-let energyHistory = [];     // recent bass-band energies for onset detection
-let lastBeatMs = 0;
-let beatIntervals = [];     // recent inter-beat intervals (ms)
+let bouncePhase = 0;          // 0..1, integrates over time at the current bounce period
+let smoothedPitchHue = 0;     // smoothed mapping of dominant pitch → hue (deg)
+let detectedBpm = 0;          // smoothed tempo from autocorrelation
+let smoothedBpm = 0;          // raw EMA accumulator
+let prevSpectrum = null;      // Uint8Array of last frame's bin magnitudes (for ODF delta)
+let odfBuffer = null;         // Float32Array ring buffer of onset-strength samples
+let odfHead = 0;              // next write index in odfBuffer
+let odfSampleCount = 0;       // valid samples in buffer (capped at length)
+let lastAnalysisMs = 0;       // last call to analyzeSpectrum
+let avgAnalysisDt = 16.67;    // EMA of analysis frame interval (ms)
+let lastTempoEstMs = 0;       // last autocorrelation run
+let lastTempoUpdateMs = 0;    // last time a real tempo was detected
 let audioCtx = null;
 let micStream = null;
 let micAnalyser = null;
-let micBuffer = null;       // time-domain (RMS)
-let freqBuf = null;         // frequency-domain (centroid + beat)
+let micBuffer = null;         // time-domain (RMS)
+let freqBuf = null;           // frequency-domain (centroid + ODF)
 let micActive = false;
-let smoothedLevel = 0;      // intensity
+let smoothedLevel = 0;        // intensity
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -172,6 +178,14 @@ function setup() {
   lastDrawMs = startMs;
   smoothedPitchHue = cfg.hueFallback;
   detectedBpm = cfg.bpmFallback;
+  smoothedBpm = 0;
+  odfBuffer = new Float32Array(cfg.odfBufferSize);
+  odfHead = 0;
+  odfSampleCount = 0;
+  prevSpectrum = null;
+  lastAnalysisMs = 0;
+  lastTempoEstMs = 0;
+  lastTempoUpdateMs = 0;
   slime.x = width / 2;
   slime.y = height / 2;
   slime.targetX = slime.x;
@@ -228,7 +242,7 @@ function draw() {
   drawSlime(renderX, renderY, frame, palette);
 }
 
-// Compute dominant pitch (spectral centroid → hue) and detect beats (bass-band onsets → BPM).
+// Pitch (spectral centroid → hue) and BPM (ODF + autocorrelation → tempo).
 function analyzeSpectrum(now) {
   if (!micAnalyser || !audioCtx) return;
   const binCount = micAnalyser.frequencyBinCount;
@@ -241,14 +255,13 @@ function analyzeSpectrum(now) {
   const fftSize = micAnalyser.fftSize;
   const binHz = sampleRate / fftSize;
 
-  // Pitch: magnitude-weighted mean frequency across the musical range, log-mapped to hue.
+  // ---------- Pitch (spectral centroid) ----------
   const pitchLow = Math.max(1, Math.ceil(cfg.pitchMinHz / binHz));
   const pitchHigh = Math.min(binCount - 1, Math.floor(cfg.pitchMaxHz / binHz));
   let weightedSum = 0, totalMag = 0;
   for (let i = pitchLow; i <= pitchHigh; i++) {
-    const m = freqBuf[i];
-    weightedSum += i * m;
-    totalMag += m;
+    weightedSum += i * freqBuf[i];
+    totalMag += freqBuf[i];
   }
   let targetHue = cfg.hueFallback;
   if (totalMag > 0 && smoothedLevel >= cfg.intensityThreshold) {
@@ -262,37 +275,86 @@ function analyzeSpectrum(now) {
   }
   smoothedPitchHue += (targetHue - smoothedPitchHue) * cfg.pitchSmoothing;
 
-  // Beat detection from bass-band onset peaks.
-  const bassLow = Math.max(1, Math.ceil(cfg.beatBandMinHz / binHz));
-  const bassHigh = Math.min(binCount - 1, Math.floor(cfg.beatBandMaxHz / binHz));
-  let bassEnergy = 0;
-  for (let i = bassLow; i <= bassHigh; i++) bassEnergy += freqBuf[i];
+  // ---------- ODF (spectral flux) ----------
+  if (!prevSpectrum || prevSpectrum.length !== binCount) {
+    prevSpectrum = new Uint8Array(binCount);
+    prevSpectrum.set(freqBuf);
+    return;  // need a previous frame to compute flux
+  }
+  const odfLow = Math.max(1, Math.ceil(cfg.odfFreqMinHz / binHz));
+  const odfHigh = Math.min(binCount - 1, Math.floor(cfg.odfFreqMaxHz / binHz));
+  let flux = 0;
+  for (let i = odfLow; i <= odfHigh; i++) {
+    const d = freqBuf[i] - prevSpectrum[i];
+    if (d > 0) flux += d;
+  }
+  prevSpectrum.set(freqBuf);
 
-  energyHistory.push(bassEnergy);
-  if (energyHistory.length > 60) energyHistory.shift();
+  odfBuffer[odfHead] = flux;
+  odfHead = (odfHead + 1) % odfBuffer.length;
+  if (odfSampleCount < odfBuffer.length) odfSampleCount++;
 
-  if (energyHistory.length >= 15 && smoothedLevel >= cfg.intensityThreshold) {
-    let sum = 0;
-    for (let i = 0; i < energyHistory.length; i++) sum += energyHistory[i];
-    const avg = sum / energyHistory.length;
-    const refractoryOk = (now - lastBeatMs) > cfg.beatMinIntervalMs;
-    if (bassEnergy > avg * cfg.beatThresholdRatio && refractoryOk) {
-      if (lastBeatMs > 0) {
-        const interval = now - lastBeatMs;
-        beatIntervals.push(interval);
-        if (beatIntervals.length > 8) beatIntervals.shift();
-        const sorted = beatIntervals.slice().sort((a, b) => a - b);
-        const median = sorted[Math.floor(sorted.length / 2)];
-        const bpm = 60000 / median;
-        detectedBpm = Math.max(cfg.bpmMin, Math.min(cfg.bpmMax, bpm));
-      }
-      lastBeatMs = now;
+  // Track analysis-call rate (used to convert lag samples → BPM).
+  if (lastAnalysisMs > 0) {
+    const dt = now - lastAnalysisMs;
+    if (dt > 0 && dt < 200) avgAnalysisDt = avgAnalysisDt * 0.9 + dt * 0.1;
+  }
+  lastAnalysisMs = now;
+
+  // ---------- Periodic tempo estimation ----------
+  const haveEnough = odfSampleCount >= odfBuffer.length / 2;
+  const dueForUpdate = now - lastTempoEstMs >= cfg.bpmEstimateIntervalMs;
+  if (haveEnough && dueForUpdate && smoothedLevel >= cfg.intensityThreshold) {
+    lastTempoEstMs = now;
+    const fps = 1000 / avgAnalysisDt;
+    const rawBpm = estimateTempoFromOdf(fps);
+    if (rawBpm > 0) {
+      if (smoothedBpm === 0) smoothedBpm = rawBpm;
+      else smoothedBpm += (rawBpm - smoothedBpm) * cfg.bpmSmoothing;
+      detectedBpm = Math.max(cfg.bpmMin, Math.min(cfg.bpmMax, smoothedBpm));
+      lastTempoUpdateMs = now;
     }
   }
-  if (now - lastBeatMs > cfg.beatTimeoutMs) {
+
+  // Reset to fallback after extended silence / no detection.
+  if (lastTempoUpdateMs > 0 && now - lastTempoUpdateMs > cfg.bpmIdleResetMs) {
+    smoothedBpm = 0;
     detectedBpm = cfg.bpmFallback;
-    beatIntervals.length = 0;
+    lastTempoUpdateMs = 0;
   }
+}
+
+// Autocorrelate the ODF buffer to estimate beat period; convert to BPM.
+function estimateTempoFromOdf(fps) {
+  const N = odfBuffer.length;
+
+  // Linearize ring buffer from oldest to newest.
+  const odf = new Float32Array(N);
+  for (let i = 0; i < N; i++) odf[i] = odfBuffer[(odfHead + i) % N];
+
+  // Subtract mean (removes DC bias from the correlation).
+  let mean = 0;
+  for (let i = 0; i < N; i++) mean += odf[i];
+  mean /= N;
+  for (let i = 0; i < N; i++) odf[i] -= mean;
+
+  const minLag = Math.max(1, Math.floor(60 * fps / cfg.bpmMax));
+  const maxLag = Math.min(N - 1, Math.ceil(60 * fps / cfg.bpmMin));
+
+  let bestLag = -1, bestScore = -Infinity;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let score = 0;
+    const samples = N - lag;
+    for (let i = lag; i < N; i++) score += odf[i] * odf[i - lag];
+    score /= samples;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLag = lag;
+    }
+  }
+
+  if (bestLag < 0 || bestScore <= 0) return 0;
+  return 60 * fps / bestLag;
 }
 
 function hopFrameAt(t) {
