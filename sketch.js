@@ -352,6 +352,8 @@ function analyzeSpectrum(now) {
 }
 
 // Autocorrelate the ODF buffer to estimate beat period; convert to BPM.
+// Uses a comb filter (sums autocorr at L, 2L, 3L, 4L) so the true beat —
+// which reinforces multiple harmonics — beats octave-error candidates.
 function estimateTempoFromOdf(fps) {
   const N = odfBuffer.length;
 
@@ -365,36 +367,56 @@ function estimateTempoFromOdf(fps) {
   mean /= N;
   for (let i = 0; i < N; i++) odf[i] -= mean;
 
-  const minLag = Math.max(1, Math.floor(60 * fps / cfg.bpmMax));
-  const maxLag = Math.min(N - 1, Math.ceil(60 * fps / cfg.bpmMin));
-
-  // Score every candidate lag, weighted by a Gaussian BPM prior so that
-  // octave errors at the extremes (~50, ~180 BPM) need to be far stronger
-  // than a natural-range candidate to win. Handles both half-time and
-  // double-time octave confusion in one pass.
-  const priorCenter = cfg.bpmPriorCenter;
-  const priorStd = cfg.bpmPriorStd;
-  const twoStdSq = 2 * priorStd * priorStd;
-
-  let bestLag = -1, bestWeighted = -Infinity, bestRawScore = 0;
-  for (let lag = minLag; lag <= maxLag; lag++) {
+  // Precompute autocorrelation at every lag — we need values at integer
+  // multiples of each candidate lag for the comb-filter step.
+  const allScores = new Float32Array(N);
+  for (let lag = 1; lag < N; lag++) {
     let s = 0;
     const samples = N - lag;
     for (let i = lag; i < N; i++) s += odf[i] * odf[i - lag];
-    const raw = s / samples;
-    if (raw <= 0) continue;
+    allScores[lag] = s / samples;
+  }
+
+  const minLag = Math.max(1, Math.floor(60 * fps / cfg.bpmMax));
+  const maxLag = Math.min(N - 1, Math.ceil(60 * fps / cfg.bpmMin));
+
+  const priorCenter = cfg.bpmPriorCenter;
+  const priorStd = cfg.bpmPriorStd;
+  const twoStdSq = 2 * priorStd * priorStd;
+  const harmonicWeights = [1.0, 0.8, 0.5, 0.3];
+
+  let bestLag = -1, bestScore = -Infinity;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    // Comb filter: sum autocorr at L, 2L, 3L, 4L.
+    // A true beat at period L has strong correlation at every integer
+    // multiple; a spurious peak (e.g., the 2x harmonic) does not.
+    let comb = 0;
+    for (let k = 0; k < harmonicWeights.length; k++) {
+      const hl = lag * (k + 1);
+      if (hl >= N) break;
+      comb += allScores[hl] * harmonicWeights[k];
+    }
+    if (comb <= 0) continue;
+    // Gaussian prior centered on a typical tempo (110 BPM) — keeps the
+    // algorithm from drifting to BPM extremes.
     const bpm = 60 * fps / lag;
     const prior = Math.exp(-((bpm - priorCenter) * (bpm - priorCenter)) / twoStdSq);
-    const weighted = raw * prior;
-    if (weighted > bestWeighted) {
-      bestWeighted = weighted;
+    const weighted = comb * prior;
+    if (weighted > bestScore) {
+      bestScore = weighted;
       bestLag = lag;
-      bestRawScore = raw;
     }
   }
 
-  if (bestLag < 0 || bestRawScore <= 0) return 0;
-  return 60 * fps / bestLag;
+  if (bestLag < 0 || bestScore <= 0) return 0;
+  let bpm = 60 * fps / bestLag;
+  // Tempo folding: an octave-error survivor (e.g., 180 BPM where the true is
+  // 90) gets halved or doubled into the presentation range [bpmOctaveMin,
+  // bpmOctaveMax]. Pragmatic — songs *near* this range read perfectly;
+  // songs well outside still produce musically related tempos.
+  while (bpm < cfg.bpmOctaveMin) bpm *= 2;
+  while (bpm > cfg.bpmOctaveMax) bpm /= 2;
+  return bpm;
 }
 
 function hopFrameAt(t) {
