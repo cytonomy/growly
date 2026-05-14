@@ -157,8 +157,9 @@ const slime = {
 
 let bgBuffer = null;
 let startMs = 0;
-let mic = null;
-let micAnalyzer = null;
+let micStream = null;
+let micAnalyser = null;
+let micBuffer = null;
 let micActive = false;
 let smoothedLevel = 0;
 
@@ -173,18 +174,13 @@ function setup() {
   slime.targetX = slime.x;
   slime.targetY = slime.y;
   rebuildBackground();
-
-  // Audio objects created here; actual mic.start() happens on first user gesture.
-  mic = new p5.AudioIn();
-  micAnalyzer = new p5.Amplitude();
-  micAnalyzer.setInput(mic);
 }
 
 function draw() {
   image(bgBuffer, 0, 0);
 
   // Smooth mic amplitude toward a clamped, gained target.
-  const rawLevel = micActive ? micAnalyzer.getLevel() : 0;
+  const rawLevel = readMicRms();
   const targetLevel = Math.min(1, rawLevel * config.micGain);
   smoothedLevel += (targetLevel - smoothedLevel) * config.micSmoothing;
 
@@ -268,13 +264,37 @@ function drawSlime(cx, cy, frame, palette) {
   }
 }
 
-function ensureMicStarted() {
-  if (micActive) return;
-  userStartAudio();
-  mic.start(
-    () => { micActive = true; },
-    () => { /* mic denied or unavailable; stay blue */ }
-  );
+async function ensureMicStarted() {
+  if (micActive || micStream) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+    const ctx = getAudioContext();
+    if (ctx.state !== 'running') await ctx.resume();
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    src.connect(analyser);
+    micStream = stream;
+    micAnalyser = analyser;
+    micBuffer = new Float32Array(analyser.fftSize);
+    micActive = true;
+  } catch (e) {
+    // permission denied or no mic — stay calm
+  }
+}
+
+function readMicRms() {
+  if (!micAnalyser) return 0;
+  micAnalyser.getFloatTimeDomainData(micBuffer);
+  let sumSq = 0;
+  for (let i = 0; i < micBuffer.length; i++) sumSq += micBuffer[i] * micBuffer[i];
+  return Math.sqrt(sumSq / micBuffer.length);
 }
 
 function mousePressed() {
