@@ -23,6 +23,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 </head>
 <body>
-  <script>document.write('<script src="sketch.js?v=' + Date.now() + '"><\/script>');</script>
+  <script>
+    var v = Date.now();
+    document.write('<script src="config.js?v=' + v + '"><\/script>');
+    document.write('<script src="sketch.js?v=' + v + '"><\/script>');
+  </script>
 </body>
 </html>

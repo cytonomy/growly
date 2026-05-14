@@ -1,38 +1,26 @@
-// Growly — blue slime. Idle bounce in place; click/tap to hop. Color shifts
-// red when the mic is louder, blue when it's quiet (smoothed).
+// Growly — pixel-art slime. Click/tap to hop. Idle bounce period and vertical
+// amplitude both react to mic level. Hue cycles the full rainbow continuously;
+// loud music speeds the cycle. All knobs live in config.js (window.GROWLY_CONFIG).
+
+const cfg = window.GROWLY_CONFIG;
 
 const SPRITE_W = 24;
 const SPRITE_H = 24;
 
-const config = {
-  renderScale: 4,
-  bouncePeriodMs: 600,
-  hopDistancePx: 48,    // sprite-pixels per single hop
-  hopDurationMs: 400,
-  hopPeakPx: 14,        // sprite-pixels of vertical lift at apex
-  arrivePx: 2,
-  micGain: 12,          // raw amplitude is small, multiply before clamping
-  micSmoothing: 0.08,   // 0=no movement, 1=instant; gentler smoothing
-  bgSeed: 1337,
-};
-
-// Palette derived from a single hue per frame — mic level rotates the hue
-// across the rainbow (blue → cyan → green → yellow → orange → red).
-// 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye dot
+// 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye dot. Hue is set per-frame;
+// saturation and lightness come from cfg per palette role.
 function paletteForHue(h) {
-  // p5's color() parses 'hsl(220, 78%, 55%)' correctly but silently returns
-  // white for 'hsl(220.32, 78%, 55%)' — round the hue to an integer.
+  // p5's color() silently returns white for non-integer hues in hsl() strings.
   const hi = Math.round(h);
   return {
-    1: color(`hsl(${hi}, 78%, 55%)`),
-    2: color(`hsl(${hi}, 92%, 80%)`),
-    3: color(`hsl(${hi}, 75%, 35%)`),
-    6: color(`hsl(${hi}, 55%, 12%)`),
+    1: color(`hsl(${hi}, ${cfg.bodySaturation}%, ${cfg.bodyLightness}%)`),
+    2: color(`hsl(${hi}, ${cfg.rimSaturation}%, ${cfg.rimLightness}%)`),
+    3: color(`hsl(${hi}, ${cfg.shadowSaturation}%, ${cfg.shadowLightness}%)`),
+    6: color(`hsl(${hi}, ${cfg.eyeSaturation}%, ${cfg.eyeLightness}%)`),
   };
 }
 
-// Rounder, slightly smaller blob: 14 wide × 14 tall (was 18 × 16).
-// Anchored bottom at row 19 across all frames.
+// Rounder, slightly smaller blob: 14 wide × 14 tall. Anchored bottom at row 19.
 const F_NEUTRAL = [
   "000000000000000000000000",
   "000000000000000000000000",
@@ -157,6 +145,9 @@ const slime = {
 
 let bgBuffer = null;
 let startMs = 0;
+let lastDrawMs = 0;
+let bouncePhase = 0;       // 0..1, integrates over time at the current bounce period
+let hueOffset = 0;         // 0..360, rotates continuously
 let audioCtx = null;
 let micStream = null;
 let micAnalyser = null;
@@ -170,6 +161,8 @@ function setup() {
   noSmooth();
   noStroke();
   startMs = millis();
+  lastDrawMs = startMs;
+  hueOffset = cfg.hueStart;
   slime.x = width / 2;
   slime.y = height / 2;
   slime.targetX = slime.x;
@@ -180,31 +173,43 @@ function setup() {
 function draw() {
   image(bgBuffer, 0, 0);
 
-  // Smooth mic amplitude toward a clamped, gained target.
+  const now = millis();
+  const dt = now - lastDrawMs;
+  lastDrawMs = now;
+
+  // Mic: smooth toward a gain-scaled, clamped target.
   const rawLevel = readMicRms();
-  const targetLevel = Math.min(1, rawLevel * config.micGain);
-  smoothedLevel += (targetLevel - smoothedLevel) * config.micSmoothing;
+  const targetLevel = Math.min(1, rawLevel * cfg.micGain);
+  smoothedLevel += (targetLevel - smoothedLevel) * cfg.micSmoothing;
 
-  // Quiet → 240° (blue). Loud → 0° (red). Smooth traversal of full rainbow.
-  const hue = 240 - smoothedLevel * 240;
-  const palette = paletteForHue(hue);
+  // Hue rotates continuously; speed is base + mic-boosted.
+  const hueSpeedDps = cfg.hueBaseSpeedDegPerSec + smoothedLevel * cfg.hueBoostSpeedDegPerSec;
+  hueOffset = (hueOffset + hueSpeedDps * dt / 1000) % 360;
+  const palette = paletteForHue(hueOffset);
 
-  updateSlime();
+  updateSlime(now);
 
   let renderX = slime.x;
   let renderY = slime.y;
   let frame;
 
   if (slime.isHopping) {
-    const t = (millis() - slime.hopStartMs) / config.hopDurationMs;
-    const lift = Math.sin(t * Math.PI) * config.hopPeakPx * config.renderScale;
+    const t = (now - slime.hopStartMs) / cfg.hopDurationMs;
+    const lift = Math.sin(t * Math.PI) * cfg.hopPeakPx * cfg.renderScale;
     renderX = lerp(slime.hopFromX, slime.hopToX, t);
     renderY = lerp(slime.hopFromY, slime.hopToY, t) - lift;
     frame = hopFrameAt(t);
   } else {
-    const phase = ((millis() - startMs) % config.bouncePeriodMs) / config.bouncePeriodMs;
-    const idx = Math.floor(phase * IDLE_FRAMES.length) % IDLE_FRAMES.length;
+    // Idle bounce: period and amplitude both lerp with mic level.
+    const period = lerp(cfg.bounceCalmPeriodMs, cfg.bounceLoudPeriodMs, smoothedLevel);
+    const ampPx  = lerp(cfg.bounceCalmAmpPx,    cfg.bounceLoudAmpPx,    smoothedLevel);
+    bouncePhase = (bouncePhase + dt / period) % 1;
+    const idx = Math.floor(bouncePhase * IDLE_FRAMES.length) % IDLE_FRAMES.length;
     frame = IDLE_FRAMES[idx];
+    // Airborne in first half of the cycle (neutral→stretch→neutral),
+    // grounded in the second half (squash). Lift is one positive sine half-arch.
+    const lift = Math.max(0, Math.sin(bouncePhase * Math.PI * 2)) * ampPx * cfg.renderScale;
+    renderY = slime.y - lift;
   }
 
   drawSlime(renderX, renderY, frame, palette);
@@ -218,9 +223,9 @@ function hopFrameAt(t) {
   return F_SQUASH;
 }
 
-function updateSlime() {
+function updateSlime(now) {
   if (slime.isHopping) {
-    if (millis() - slime.hopStartMs >= config.hopDurationMs) {
+    if (now - slime.hopStartMs >= cfg.hopDurationMs) {
       slime.x = slime.hopToX;
       slime.y = slime.hopToY;
       slime.isHopping = false;
@@ -231,20 +236,20 @@ function updateSlime() {
   const dx = slime.targetX - slime.x;
   const dy = slime.targetY - slime.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist < config.arrivePx) return;
+  if (dist < cfg.arrivePx) return;
 
-  const reach = config.hopDistancePx * config.renderScale;
+  const reach = cfg.hopDistancePx * cfg.renderScale;
   const ratio = Math.min(1, reach / dist);
   slime.hopFromX = slime.x;
   slime.hopFromY = slime.y;
   slime.hopToX = slime.x + dx * ratio;
   slime.hopToY = slime.y + dy * ratio;
-  slime.hopStartMs = millis();
+  slime.hopStartMs = now;
   slime.isHopping = true;
 }
 
 function drawSlime(cx, cy, frame, palette) {
-  const s = config.renderScale;
+  const s = cfg.renderScale;
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
   const oy = Math.round(cy - (SPRITE_H * s) / 2);
 
@@ -318,7 +323,7 @@ function rebuildBackground() {
   bgBuffer.noSmooth();
   bgBuffer.pixelDensity(1);
 
-  const s = config.renderScale;
+  const s = cfg.renderScale;
   const GRASS_LIGHT = '#5BB04A';
   const GRASS_MID   = '#3F8F2F';
   const GRASS_DARK  = '#256E1B';
@@ -327,7 +332,7 @@ function rebuildBackground() {
   bgBuffer.fill(GRASS_MID);
   bgBuffer.rect(0, 0, bgBuffer.width, bgBuffer.height);
 
-  noiseSeed(config.bgSeed);
+  noiseSeed(cfg.bgSeed);
   const tile = 2;
   const cols = Math.ceil(bgBuffer.width / (tile * s));
   const rows = Math.ceil(bgBuffer.height / (tile * s));
@@ -343,7 +348,7 @@ function rebuildBackground() {
     }
   }
 
-  randomSeed(config.bgSeed);
+  randomSeed(cfg.bgSeed);
   const tuftCount = Math.floor((bgBuffer.width * bgBuffer.height) / (s * s * 80));
   for (let i = 0; i < tuftCount; i++) {
     const tx = Math.floor(random(bgBuffer.width / s)) * s;
