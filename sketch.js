@@ -11,8 +11,8 @@ const config = {
   hopDurationMs: 400,
   hopPeakPx: 14,        // sprite-pixels of vertical lift at apex
   arrivePx: 2,
-  micGain: 4,           // raw amplitude is small, multiply before clamping
-  micSmoothing: 0.2,    // 0=no movement, 1=instant; slight smoothing
+  micGain: 8,           // raw amplitude is small, multiply before clamping
+  micSmoothing: 0.3,    // 0=no movement, 1=instant; slight smoothing
   bgSeed: 1337,
 };
 
@@ -290,7 +290,6 @@ async function ensureMicStarted() {
     micActive = true;
   } catch (e) {
     // permission denied or no mic — stay calm
-    window._growlyMicError = String(e);
   }
 }
 
