@@ -152,7 +152,7 @@ let lastDrawMs = 0;
 let bouncePhase = 0;          // 0..1, integrates over time at the current bounce period
 let smoothedPitchHue = 0;     // smoothed mapping of dominant pitch → hue (deg)
 let detectedBpm = 0;          // smoothed tempo from autocorrelation
-let smoothedBpm = 0;          // raw EMA accumulator
+let tempoEstimates = [];      // rolling buffer of recent raw BPM estimates
 let prevSpectrum = null;      // Uint8Array of last frame's bin magnitudes (for ODF delta)
 let odfBuffer = null;         // Float32Array ring buffer of onset-strength samples
 let odfHead = 0;              // next write index in odfBuffer
@@ -178,7 +178,7 @@ function setup() {
   lastDrawMs = startMs;
   smoothedPitchHue = cfg.hueFallback;
   detectedBpm = cfg.bpmFallback;
-  smoothedBpm = 0;
+  tempoEstimates = [];
   odfBuffer = new Float32Array(cfg.odfBufferSize);
   odfHead = 0;
   odfSampleCount = 0;
@@ -333,16 +333,19 @@ function analyzeSpectrum(now) {
     const fps = 1000 / avgAnalysisDt;
     const rawBpm = estimateTempoFromOdf(fps);
     if (rawBpm > 0) {
-      if (smoothedBpm === 0) smoothedBpm = rawBpm;
-      else smoothedBpm += (rawBpm - smoothedBpm) * cfg.bpmSmoothing;
-      detectedBpm = Math.max(cfg.bpmMin, Math.min(cfg.bpmMax, smoothedBpm));
+      tempoEstimates.push(rawBpm);
+      if (tempoEstimates.length > cfg.bpmHistorySize) tempoEstimates.shift();
+      // Median of recent raw estimates — robust to single bad reads.
+      const sorted = tempoEstimates.slice().sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      detectedBpm = Math.max(cfg.bpmMin, Math.min(cfg.bpmMax, median));
       lastTempoUpdateMs = now;
     }
   }
 
   // Reset to fallback after extended silence / no detection.
   if (lastTempoUpdateMs > 0 && now - lastTempoUpdateMs > cfg.bpmIdleResetMs) {
-    smoothedBpm = 0;
+    tempoEstimates = [];
     detectedBpm = cfg.bpmFallback;
     lastTempoUpdateMs = 0;
   }
@@ -365,19 +368,34 @@ function estimateTempoFromOdf(fps) {
   const minLag = Math.max(1, Math.floor(60 * fps / cfg.bpmMax));
   const maxLag = Math.min(N - 1, Math.ceil(60 * fps / cfg.bpmMin));
 
-  let bestLag = -1, bestScore = -Infinity;
+  // Score every candidate lag once, then we can also look up harmonics.
+  const scores = new Float32Array(maxLag + 1);
   for (let lag = minLag; lag <= maxLag; lag++) {
-    let score = 0;
+    let s = 0;
     const samples = N - lag;
-    for (let i = lag; i < N; i++) score += odf[i] * odf[i - lag];
-    score /= samples;
-    if (score > bestScore) {
-      bestScore = score;
+    for (let i = lag; i < N; i++) s += odf[i] * odf[i - lag];
+    scores[lag] = s / samples;
+  }
+
+  // Pick the best lag.
+  let bestLag = minLag, bestScore = scores[minLag];
+  for (let lag = minLag + 1; lag <= maxLag; lag++) {
+    if (scores[lag] > bestScore) {
+      bestScore = scores[lag];
       bestLag = lag;
     }
   }
+  if (bestScore <= 0) return 0;
 
-  if (bestLag < 0 || bestScore <= 0) return 0;
+  // Octave correction: the autocorrelation of a beat sequence is strong at
+  // every integer multiple of the beat period. If the half-lag also has a
+  // strong score, the "best" we found is actually the 2nd harmonic — prefer
+  // the shorter lag (the true beat period → higher BPM).
+  const halfLag = Math.round(bestLag / 2);
+  if (halfLag >= minLag && scores[halfLag] > bestScore * cfg.octaveHarmonicThreshold) {
+    bestLag = halfLag;
+  }
+
   return 60 * fps / bestLag;
 }
 
