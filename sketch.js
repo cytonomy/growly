@@ -157,6 +157,7 @@ const slime = {
 
 let bgBuffer = null;
 let startMs = 0;
+let audioCtx = null;
 let micStream = null;
 let micAnalyser = null;
 let micBuffer = null;
@@ -274,10 +275,13 @@ async function ensureMicStarted() {
         autoGainControl: false,
       },
     });
-    const ctx = getAudioContext();
-    if (ctx.state !== 'running') await ctx.resume();
-    const src = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
+    if (!audioCtx) {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctor();
+    }
+    if (audioCtx.state !== 'running') await audioCtx.resume();
+    const src = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 1024;
     src.connect(analyser);
     micStream = stream;
