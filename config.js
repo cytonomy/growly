@@ -29,8 +29,9 @@ window.GROWLY_CONFIG = {
   odfFreqMaxHz: 4000,
   odfBufferSize: 256,           // ~4 sec of recent onset strength at 60 Hz analysis
   bpmEstimateIntervalMs: 400,   // re-run autocorrelation this often
-  bpmHistorySize: 6,            // median of last N raw estimates → detectedBpm
-  octaveHarmonicThreshold: 0.7, // if half-lag score > this * best, prefer it (fundamental, not 2nd harmonic)
+  bpmHistorySize: 8,            // median of last N raw estimates → detectedBpm
+  bpmPriorCenter: 110,          // Gaussian prior — peaks near here are preferred
+  bpmPriorStd: 80,              // std of the prior; larger = weaker bias
   bpmIdleResetMs: 4000,         // reset to fallback after this many ms of silence
   bpmFallback: 75,
   bpmMin: 50,

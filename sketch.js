@@ -368,34 +368,32 @@ function estimateTempoFromOdf(fps) {
   const minLag = Math.max(1, Math.floor(60 * fps / cfg.bpmMax));
   const maxLag = Math.min(N - 1, Math.ceil(60 * fps / cfg.bpmMin));
 
-  // Score every candidate lag once, then we can also look up harmonics.
-  const scores = new Float32Array(maxLag + 1);
+  // Score every candidate lag, weighted by a Gaussian BPM prior so that
+  // octave errors at the extremes (~50, ~180 BPM) need to be far stronger
+  // than a natural-range candidate to win. Handles both half-time and
+  // double-time octave confusion in one pass.
+  const priorCenter = cfg.bpmPriorCenter;
+  const priorStd = cfg.bpmPriorStd;
+  const twoStdSq = 2 * priorStd * priorStd;
+
+  let bestLag = -1, bestWeighted = -Infinity, bestRawScore = 0;
   for (let lag = minLag; lag <= maxLag; lag++) {
     let s = 0;
     const samples = N - lag;
     for (let i = lag; i < N; i++) s += odf[i] * odf[i - lag];
-    scores[lag] = s / samples;
-  }
-
-  // Pick the best lag.
-  let bestLag = minLag, bestScore = scores[minLag];
-  for (let lag = minLag + 1; lag <= maxLag; lag++) {
-    if (scores[lag] > bestScore) {
-      bestScore = scores[lag];
+    const raw = s / samples;
+    if (raw <= 0) continue;
+    const bpm = 60 * fps / lag;
+    const prior = Math.exp(-((bpm - priorCenter) * (bpm - priorCenter)) / twoStdSq);
+    const weighted = raw * prior;
+    if (weighted > bestWeighted) {
+      bestWeighted = weighted;
       bestLag = lag;
+      bestRawScore = raw;
     }
   }
-  if (bestScore <= 0) return 0;
 
-  // Octave correction: the autocorrelation of a beat sequence is strong at
-  // every integer multiple of the beat period. If the half-lag also has a
-  // strong score, the "best" we found is actually the 2nd harmonic — prefer
-  // the shorter lag (the true beat period → higher BPM).
-  const halfLag = Math.round(bestLag / 2);
-  if (halfLag >= minLag && scores[halfLag] > bestScore * cfg.octaveHarmonicThreshold) {
-    bestLag = halfLag;
-  }
-
+  if (bestLag < 0 || bestRawScore <= 0) return 0;
   return 60 * fps / bestLag;
 }
 
