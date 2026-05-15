@@ -10,129 +10,134 @@ const cfg = window.GROWLY_CONFIG;
 const SPRITE_W = 24;
 const SPRITE_H = 24;
 
-// Piecewise log-frequency → hue mapping with shortest-path interpolation
-// around the color wheel. Stops live in cfg.pitchHueStops as [hz, hue°] pairs.
-// Shortest-path means the trip from green (~100°) up to pink (~320°) wraps
-// BACKWARDS through warm colors (yellow→orange→red→magenta) instead of
-// forward through cyan/blue — keeping blue reserved for the silent ambient.
-function pitchHueFor(hz) {
-  const stops = cfg.pitchHueStops;
-  if (hz <= stops[0][0]) return stops[0][1];
-  for (let i = 0; i < stops.length - 1; i++) {
-    const [hz0, h0] = stops[i];
-    const [hz1, h1] = stops[i + 1];
-    if (hz <= hz1) {
-      const f = (Math.log(hz) - Math.log(hz0)) / (Math.log(hz1) - Math.log(hz0));
-      return lerpHueShortest(h0, h1, f);
-    }
-  }
-  return stops[stops.length - 1][1];
+// 3-band energy → RGB color. Each frequency band contributes a base color and
+// the bands are *mixed in RGB* so the path between dominant bands (e.g.
+// mid→high) crosses through gray, not through unwanted hues like the red zone
+// that a hue-wheel lerp would inevitably traverse. bandBass → red,
+// bandMid → green, bandHigh → magenta (R+B). Bass+mid in equal proportion
+// renders as yellow (R+G), mid+high as cyan-ish, and all three together as
+// near-white. Silent / sub-threshold input falls through to cfg.ambientRgb.
+function rgbToHsl(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  const l = (max + min) / 2;
+  if (d < 0.0005) return { h: cfg.hueFallback, s: 0, l };
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r)      h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else                h = (r - g) / d + 4;
+  h *= 60;
+  if (h < 0) h += 360;
+  return { h, s, l };
 }
 
-function lerpHueShortest(h0, h1, t) {
-  // Shortest signed path from h0 to h1 around 360°; range [-180, 180].
-  const d = ((h1 - h0 + 540) % 360) - 180;
-  return ((h0 + d * t) + 360) % 360;
-}
-
-// 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye dot. Hue is set per-frame;
-// saturation and lightness come from cfg per palette role.
-function paletteForHue(h) {
-  // p5's color() silently returns white for non-integer hues in hsl() strings.
+// 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye pupil, 7 eye highlight.
+// Saturations + lightnesses per role come from cfg; hue comes from the
+// smoothed RGB color and is converted via rgbToHsl. The role saturation is
+// scaled by the RGB-derived saturation so during a transition through gray
+// the sprite briefly desaturates instead of staying at a stuck hue.
+function paletteForRgb(r, g, b) {
+  const { h, s } = rgbToHsl(r, g, b);
   const hi = Math.round(h);
+  const k = Math.max(0, Math.min(1, s));   // role-sat multiplier
   return {
-    1: color(`hsl(${hi}, ${cfg.bodySaturation}%, ${cfg.bodyLightness}%)`),
-    2: color(`hsl(${hi}, ${cfg.rimSaturation}%, ${cfg.rimLightness}%)`),
-    3: color(`hsl(${hi}, ${cfg.shadowSaturation}%, ${cfg.shadowLightness}%)`),
-    6: color(`hsl(${hi}, ${cfg.eyeSaturation}%, ${cfg.eyeLightness}%)`),
+    1: color(`hsl(${hi}, ${Math.round(cfg.bodySaturation * k)}%, ${cfg.bodyLightness}%)`),
+    2: color(`hsl(${hi}, ${Math.round(cfg.rimSaturation * k)}%, ${cfg.rimLightness}%)`),
+    3: color(`hsl(${hi}, ${Math.round(cfg.shadowSaturation * k)}%, ${cfg.shadowLightness}%)`),
+    6: color(`hsl(${hi}, ${Math.round(cfg.eyeSaturation * k)}%, ${cfg.eyeLightness}%)`),
+    7: color(`hsl(${hi}, ${Math.round(cfg.bodySaturation * k * 0.4)}%, 92%)`),  // near-white tinted highlight
   };
 }
 
-// Rounder, slightly smaller blob: 14 wide × 14 tall. Anchored bottom at row 19.
+// Round-dome blob, ~19 wide × 16 tall. 2-pixel kawaii eyes (color 7 highlight
+// dot above color 6 pupil). Bottom half is the darker shadow color (3).
+// Generated from test_tracks/gen_sprite.py — re-run there to tweak proportions.
 const F_NEUTRAL = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000022220000000000",
-  "000000002111111200000000",
-  "000000021111111120000000",
+  "000000022222222220000000",
   "000000211111111112000000",
-  "000002111111111111200000",
-  "000002116111111611200000",
-  "000002111111111111200000",
-  "000002111111111111200000",
-  "000002333333333333200000",
+  "000022111111111111220000",
+  "000211111111111111112000",
+  "000211111111111111112000",
+  "002111111111111111111200",
+  "002111171111111171111200",
+  "002111161111111161111200",
+  "002111111111111111111200",
+  "002333333333333333333200",
+  "002333333333333333333200",
+  "000233333333333333332000",
+  "000233333333333333332000",
+  "000022333333333333220000",
   "000000233333333332000000",
-  "000000023333333320000000",
-  "000000002333333200000000",
-  "000000000233332000000000",
-  "000000000022220000000000",
-  "000000000000000000000000",
+  "000000022222222220000000",
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
 ];
 
-// Mid-stretch — between neutral and stretch. 12 wide × 15 tall.
+// Mid-stretch — between neutral and full stretch. Slightly taller, slightly narrower.
 const F_MID_STRETCH = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000022220000000000",
-  "000000002111111200000000",
-  "000000021111111120000000",
+  "000000000222222000000000",
+  "000000022111111220000000",
   "000000211111111112000000",
-  "000000211111111112000000",
-  "000000211111111112000000",
-  "000000216111111612000000",
-  "000000211111111112000000",
+  "000002111111111111200000",
+  "000021111111111111120000",
+  "000211111111111111112000",
+  "000211111111111111112000",
+  "000211111111111111112000",
+  "000211117111111171112000",
+  "002111116111111161111200",
+  "000211111111111111112000",
+  "000233333333333333332000",
+  "000233333333333333332000",
+  "000233333333333333332000",
+  "000023333333333333320000",
+  "000002333333333333200000",
   "000000233333333332000000",
-  "000000233333333332000000",
-  "000000023333333320000000",
-  "000000002333333200000000",
-  "000000000233332000000000",
-  "000000000023320000000000",
-  "000000000022220000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
+  "000000022333333220000000",
+  "000000000222222000000000",
   "000000000000000000000000",
   "000000000000000000000000",
 ];
 
-// Stretched. 10 wide × 16 tall.
+// Stretched — tall and narrower for the apex of a loud bounce.
 const F_STRETCH = [
   "000000000000000000000000",
   "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000022220000000000",
+  "000000000222222000000000",
   "000000002111111200000000",
   "000000021111111120000000",
-  "000000021111111120000000",
-  "000000021111111120000000",
-  "000000021111111120000000",
-  "000000026111111620000000",
-  "000000021111111120000000",
-  "000000021111111120000000",
-  "000000023333333320000000",
-  "000000023333333320000000",
+  "000000211111111112000000",
+  "000002111111111111200000",
+  "000002111111111111200000",
+  "000021111111111111120000",
+  "000021111111111111120000",
+  "000021117111117111120000",
+  "000021116111116111120000",
+  "000021111111111111120000",
+  "000023333333333333320000",
+  "000023333333333333320000",
+  "000023333333333333320000",
+  "000002333333333333200000",
+  "000002333333333333200000",
+  "000000233333333332000000",
   "000000023333333320000000",
   "000000002333333200000000",
-  "000000000233332000000000",
-  "000000000023320000000000",
-  "000000000022220000000000",
-  "000000000000000000000000",
-  "000000000000000000000000",
+  "000000000222222000000000",
   "000000000000000000000000",
   "000000000000000000000000",
 ];
 
-// Squashed. 16 wide × 10 tall.
+// Squashed — wide and short for the impact of a hard landing.
 const F_SQUASH = [
   "000000000000000000000000",
   "000000000000000000000000",
@@ -143,18 +148,18 @@ const F_SQUASH = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
-  "000000000000000000000000",
-  "000000000022220000000000",
-  "000000021111111120000000",
-  "000002116111111611200000",
-  "000021111111111111112000",
-  "000023333333333333332000",
-  "000023333333333333332000",
-  "000002333333333333200000",
-  "000000233333333332000000",
-  "000000002333333200000000",
-  "000000000022220000000000",
-  "000000000000000000000000",
+  "000000022222222220000000",
+  "000002211111111112200000",
+  "000221111111111111122000",
+  "002111711111111171111200",
+  "021111611111111161111120",
+  "021111111111111111111120",
+  "023333333333333333333320",
+  "023333333333333333333320",
+  "002333333333333333333200",
+  "000223333333333333322000",
+  "000002233333333332200000",
+  "000000022222222220000000",
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
@@ -177,7 +182,9 @@ let lastDrawMs = 0;
 let bouncePhase = 0;          // 0..1, integrates over time at the current bounce period
 let lastBouncePhase = 0;      // detect bounce wrap-around to flip lateral landing side
 let swayLandSide = 1;         // alternates ±1 each landing — Growly arcs L→R→L→R, never drifting
-let smoothedPitchHue = 0;     // smoothed mapping of dominant pitch → hue (deg)
+let smoothedR = 0;            // smoothed RGB color from 3-band energy mix
+let smoothedG = 0;
+let smoothedB = 0;
 let detectedBpm = 0;          // smoothed tempo from autocorrelation
 let tempoEstimates = [];      // rolling buffer of recent raw BPM estimates
 let outlierCandidates = [];   // recent confident estimates that are far from the median
@@ -206,7 +213,9 @@ function setup() {
   noStroke();
   startMs = millis();
   lastDrawMs = startMs;
-  smoothedPitchHue = cfg.hueFallback;
+  smoothedR = cfg.ambientRgb[0];
+  smoothedG = cfg.ambientRgb[1];
+  smoothedB = cfg.ambientRgb[2];
   detectedBpm = cfg.bpmFallback;
   tempoEstimates = [];
   outlierCandidates = [];
@@ -243,10 +252,10 @@ function draw() {
   displayLevel += (smoothedLevel - displayLevel) * cfg.levelDisplaySmoothing;
   const intensity = smoothedLevel;
 
-  // Pitch + beat analysis from FFT (updates smoothedPitchHue + detectedBpm).
+  // Pitch + beat analysis from FFT (updates smoothedR/G/B + detectedBpm).
   analyzeSpectrum(now);
 
-  const palette = paletteForHue(smoothedPitchHue);
+  const palette = paletteForRgb(smoothedR, smoothedG, smoothedB);
 
   updateSlime(now);
 
@@ -310,7 +319,7 @@ function draw() {
 function drawHud() {
   const lines = [
     `BPM   ${micActive ? Math.round(detectedBpm) : '—'}`,
-    `pitch ${Math.round(smoothedPitchHue)}°`,
+    `hue   ${Math.round(rgbToHsl(smoothedR, smoothedG, smoothedB).h)}°`,
     `level ${(displayLevel * 100).toFixed(0)}%`,
     `odf   ${odfSampleCount}/${cfg.odfBufferSize}`,
     `fps   ${(1000 / avgAnalysisDt).toFixed(0)}`,
@@ -342,23 +351,45 @@ function analyzeSpectrum(now) {
   const fftSize = micAnalyser.fftSize;
   const binHz = sampleRate / fftSize;
 
-  // ---------- Pitch (spectral centroid) ----------
-  const pitchLow = Math.max(1, Math.ceil(cfg.pitchMinHz / binHz));
-  const pitchHigh = Math.min(binCount - 1, Math.floor(cfg.pitchMaxHz / binHz));
-  let weightedSum = 0, totalMag = 0;
-  for (let i = pitchLow; i <= pitchHigh; i++) {
-    weightedSum += i * freqBuf[i];
-    totalMag += freqBuf[i];
+  // ---------- Spectral bands → RGB color ----------
+  // bandBass → red, bandMid → green, bandHigh → magenta (R+B).
+  // Mixing in RGB lets bass+mid render as yellow, mid+high as gray-cyan,
+  // all-bands as near-white — and importantly avoids hue-wheel detours
+  // through red/blue during transitions. Below intensityThreshold the
+  // mic is treated as silent and the ambient color is used.
+  function bandEnergy(loHz, hiHz) {
+    const lo = Math.max(1, Math.ceil(loHz / binHz));
+    const hi = Math.min(binCount - 1, Math.floor(hiHz / binHz));
+    let e = 0;
+    for (let i = lo; i <= hi; i++) e += freqBuf[i];
+    return e / Math.max(1, hi - lo + 1);
   }
-  let targetHue = cfg.hueFallback;
-  if (totalMag > 0 && smoothedLevel >= cfg.intensityThreshold) {
-    const meanBin = weightedSum / totalMag;
-    const pitchHz = meanBin * binHz;
-    targetHue = pitchHueFor(pitchHz);
+  let targetR = cfg.ambientRgb[0];
+  let targetG = cfg.ambientRgb[1];
+  let targetB = cfg.ambientRgb[2];
+  if (smoothedLevel >= cfg.intensityThreshold) {
+    const eB = bandEnergy(cfg.bandBassHz[0], cfg.bandBassHz[1]);
+    const eM = bandEnergy(cfg.bandMidHz[0], cfg.bandMidHz[1]);
+    const eH = bandEnergy(cfg.bandHighHz[0], cfg.bandHighHz[1]);
+    const total = eB + eM + eH;
+    if (total > 0.0001) {
+      const wB = eB / total;
+      const wM = eM / total;
+      const wH = eH / total;
+      // Bass adds red; mid adds green; high adds R+B (= magenta/pink).
+      let R = wB + wH * cfg.bandHighRedShare;
+      let G = wM;
+      let B = wH * cfg.bandHighBlueShare;
+      // Normalize so the dominant component is 1 — keeps colors saturated
+      // rather than dim when bands are spread.
+      const m = Math.max(R, G, B);
+      if (m > 0) { R /= m; G /= m; B /= m; }
+      targetR = R; targetG = G; targetB = B;
+    }
   }
-  // Circular EMA — interpolate along the shorter arc so the color doesn't take
-  // the long way around the wheel during a hue jump (e.g. red→pink).
-  smoothedPitchHue = lerpHueShortest(smoothedPitchHue, targetHue, cfg.pitchSmoothing);
+  smoothedR += (targetR - smoothedR) * cfg.pitchSmoothing;
+  smoothedG += (targetG - smoothedG) * cfg.pitchSmoothing;
+  smoothedB += (targetB - smoothedB) * cfg.pitchSmoothing;
 
   // ---------- ODF (spectral flux) ----------
   if (!prevSpectrum || prevSpectrum.length !== binCount) {
@@ -587,7 +618,7 @@ function drawSlime(cx, cy, frame, palette) {
   if (!isFinite(cx)) cx = width / 2;
   if (!isFinite(cy)) cy = height / 2;
   if (!frame || !Array.isArray(frame) || frame.length !== SPRITE_H) frame = F_NEUTRAL;
-  if (!palette || !palette[1]) palette = paletteForHue(cfg.hueFallback);
+  if (!palette || !palette[1]) palette = paletteForRgb(cfg.ambientRgb[0], cfg.ambientRgb[1], cfg.ambientRgb[2]);
 
   const s = cfg.renderScale;
   const ox = Math.round(cx - (SPRITE_W * s) / 2);

@@ -8,7 +8,7 @@ Live: <https://cytonomy.github.io/growly/>
 
 | Audio feature | What Growly does |
 |---|---|
-| **Pitch** (spectral centroid) | Sets his **color** along a piecewise palette designed for *visible* musical regions (not a generic rainbow): **red** for bass/kick, **orange** for bass-mid, **yellow** for low-mid/vocals, **green** for mids/guitars, **purple** for high-mid/cymbals, **pink/magenta** for air/sparkle. Blue is reserved for ambient silence. The mapping interpolates along the shorter arc of the color wheel between log-frequency anchors, so the green→purple transition wraps backwards through warm colors instead of crossing through blue. Smoothed slowly so the color has time to dwell on each region. Anchors live in `pitchHueStops`. |
+| **Spectral content** (3-band energy mix) | Sets his **color** by mixing band energies in RGB: bass band → **red**, mid band → **green**, high band → **pink/magenta**. Combinations naturally render the way you'd expect — bass+mid = **yellow**, mid+high = cyan-ish, full-spectrum = near-white. Silent or sub-threshold input falls back to **ambient blue**. Mixing in RGB (not on the hue wheel) means transitions between dominant bands pass through gray instead of detouring through unwanted hues. Bands and their RGB contributions are configurable in `bandBassHz` / `bandMidHz` / `bandHighHz` / `bandHigh*Share`. |
 | **Volume / intensity** | Sets the **height of his jiggle** *and* the **amount he stretches/squashes**. Quiet → barely-there bob with no shape change. Loud → full launch + dramatic stretch on the way up + squash on landing. |
 | **BPM** | Sets the **speed of his jiggle** — one bounce per beat. Detected via spectral-flux ODF + autocorrelation with comb filter, Gaussian prior, confidence gating, median smoothing, outlier rejection, and tempo octave folding into 80–160 BPM. |
 | **High BPM** | Above ~105 BPM, each bounce **arcs from one landing side to the other**, alternating L↔R. He lands at the new side, holds there during the ground portion of the cycle, then takes off into the next arc the other way. Net drift is zero. Arc spread grows with tempo and intensity. |
@@ -29,9 +29,11 @@ Notable knobs:
 - `micGain` — calibrate so typical room volume reads ~80% on the HUD; clipping at 100% is fine
 - `micSmoothing` — EMA on intensity used by bounce/sway (fast; lower = smoother)
 - `levelDisplaySmoothing` — EMA on the HUD `level%` readout only (slower; keeps the number from flickering while the animation stays responsive)
-- `pitchHueStops` — `[centroidHz, hue°]` anchors that define the bass→mid→high color palette. Edit a single anchor to remap a frequency band to a different color.
-- `pitchSmoothing` — EMA on hue (lower = slower, more dramatic dwell on each color)
-- `hueFallback` — ambient blue shown when intensity is below `intensityThreshold`
+- `bandBassHz` / `bandMidHz` / `bandHighHz` — frequency ranges (Hz) for each of the three band-energy buckets that drive color
+- `bandHighRedShare` / `bandHighBlueShare` — how much of the high-band energy leaks into R vs B; together they shape what "pure highs" look like (default both 0.9 = pink-magenta)
+- `ambientRgb` — `[r, g, b]` shown when `smoothedLevel` is below `intensityThreshold` (default light blue)
+- `pitchSmoothing` — EMA on the RGB color (lower = slower, more dramatic dwell)
+- `intensityThreshold` — below this smoothed level, color falls back to ambient AND silence-reset begins counting toward dropping the BPM lock
 - `bpmConfidenceThreshold` — how dominant the autocorrelation peak must be before we commit a new tempo
 - `bpmOutlierTolerance` / `bpmOutlierConfirmations` / `bpmOutlierStabilityStdMax` — once locked, an alternative tempo must (a) drift far enough, (b) repeat for `bpmOutlierConfirmations × bpmEstimateIntervalMs` worth of estimates, and (c) cluster tightly (std under `bpmOutlierStabilityStdMax`) before it can flush the lock. Random mic noise scatters too widely to ever pass.
 - `silenceResetMs` — how long the room must be quiet before Growly drops his current tempo lock and reverts to `bpmFallback`

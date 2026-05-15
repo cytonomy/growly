@@ -16,27 +16,21 @@ window.GROWLY_CONFIG = {
   levelDisplaySmoothing: 0.04,    // EMA factor on the HUD level% readout (slow — keeps it from flickering)
   fftSize: 2048,
 
-  // ----- Pitch → hue (spectral centroid drives color) -----
-  // Centroid frequency (Hz) is the energy-weighted mean over [pitchMinHz, pitchMaxHz].
-  // pitchHueStops maps centroid Hz → hue° as a piecewise log-frequency lerp,
-  // interpolated along the SHORTER arc of the color wheel between successive
-  // anchors. The path bass → mid → high goes red → yellow → green → (skipping
-  // blue, wrapping backwards through warm colors) → pink/purple. Blue is
-  // reserved for the ambient/silent state (hueFallback).
-  pitchMinHz: 80,
-  pitchMaxHz: 5000,
-  pitchHueStops: [
-    // [centroid_hz, hue_deg]
-    [80,    0],     // sub-bass / kick           → deep red
-    [250,  20],     // bass                      → warm red-orange
-    [600,  60],     // low-mid / vocals          → yellow
-    [1500, 110],    // mid / guitars             → green
-    [3000, 290],    // high-mid / cymbals        → purple (wraps the short way back through warm colors, skipping blue)
-    [5000, 325],    // air / sparkle             → pink/magenta
-  ],
-  pitchSmoothing: 0.04,           // lower = slower, more dramatic dwell on each color (was 0.08)
-  hueFallback: 220,               // ambient blue when smoothedLevel < intensityThreshold
-  intensityThreshold: 0.02,
+  // ----- Spectral bands → RGB color -----
+  // Each band's energy contributes to a base color; the bands are MIXED in
+  // RGB so transitions between dominant bands pass through gray, not through
+  // unwanted hues. Bass adds R; mid adds G; high adds R+B (= magenta/pink).
+  // bass+mid = yellow, mid+high = cyan-ish, all-bands = near-white, silence
+  // = ambient blue.
+  bandBassHz:  [60,   300],       // kick / sub-bass / low strings → red
+  bandMidHz:   [300,  1500],      // vocals / guitars / mids       → green
+  bandHighHz:  [1500, 5000],      // cymbals / hats / air          → pink-magenta
+  bandHighRedShare:  0.9,         // how much high band leaks into R (1 = full pink, 0 = pure blue)
+  bandHighBlueShare: 0.9,         // how much high band leaks into B
+  ambientRgb: [0.15, 0.35, 1.0],  // shown when smoothedLevel < intensityThreshold (light blue)
+  pitchSmoothing: 0.06,           // EMA on the RGB color — lower = slower dwell
+  hueFallback: 220,               // hue used only when the smoothed RGB is gray (saturation ≈ 0)
+  intensityThreshold: 0.30,       // bumped from 0.02 — with micGain=30 the silent room reads ~15-25%; this gates pitch detection and arms the silence-reset timer for BPM
 
   // ----- BPM detection -----
   // Spectral-flux ODF + autocorrelation with comb filter + Gaussian prior
@@ -61,7 +55,7 @@ window.GROWLY_CONFIG = {
   // existing lock — protects against a single bridge / bar where the
   // algorithm latches onto a syncopated harmonic.
   bpmOutlierTolerance: 0.15,
-  bpmOutlierConfirmations: 30,         // 12s of contiguous outliers required to flush — slow swing songs (At Last) produce 6s+ runs at wrong harmonics on noisy mic
+  bpmOutlierConfirmations: 15,         // ~6s of contiguous outliers required to flush — was 30, but with the higher intensityThreshold the silence-reset between songs now releases the lock cleanly, so we don't need the longer guard
   bpmOutlierStabilityStdMax: 8,        // …and they must agree (std < this BPM) — random noise spikes vary too much to pass
   // Silence-based reset. If the smoothed mic level stays below
   // intensityThreshold for this long, we drop the lock and revert to
