@@ -163,6 +163,7 @@ let lastAnalysisMs = 0;       // last call to analyzeSpectrum
 let avgAnalysisDt = 16.67;    // EMA of analysis frame interval (ms)
 let lastTempoEstMs = 0;       // last autocorrelation run
 let lastTempoUpdateMs = 0;    // last time a real tempo was detected
+let silenceStartMs = 0;       // when the room first went quiet (0 = not silent)
 let audioCtx = null;
 let micStream = null;
 let micAnalyser = null;
@@ -182,6 +183,7 @@ function setup() {
   detectedBpm = cfg.bpmFallback;
   tempoEstimates = [];
   outlierCandidates = [];
+  silenceStartMs = 0;
   swayPhase = 0;
   odfBuffer = new Float32Array(cfg.odfBufferSize);
   odfHead = 0;
@@ -462,14 +464,14 @@ function hopFrameAt(t) {
   return F_SQUASH;
 }
 
-// Idle-bounce frame selection grades the deformation amount by intensity:
-// silent → no shape change; loud → full squash/stretch cycle.
+// Idle-bounce frame selection grades the deformation amount by intensity.
+// Even at zero intensity Growly shows a subtle apex stretch so the loop
+// is always visibly animating, not just hovering.
 function frameForIntensity(quarter, intensity) {
-  if (intensity < cfg.intensityToFlatten) return F_NEUTRAL;
-  if (intensity < cfg.intensityToMidStretch) {
+  if (intensity < cfg.intensityToFullStretch) {
     return quarter === 1 ? F_MID_STRETCH : F_NEUTRAL;
   }
-  if (intensity < cfg.intensityToFullStretch) {
+  if (intensity < cfg.intensityToFullSquash) {
     return quarter === 1 ? F_STRETCH : F_NEUTRAL;
   }
   return IDLE_FRAMES[quarter];

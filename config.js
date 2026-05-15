@@ -34,8 +34,7 @@ window.GROWLY_CONFIG = {
   bpmHistorySize: 24,
   bpmPriorCenter: 110,
   bpmPriorStd: 70,
-  bpmConfidenceThreshold: 4.0,    // raise the bar for committing an estimate
-  bpmIdleResetMs: 30000,          // hold the lock through long silences
+  bpmConfidenceThreshold: 3.0,    // first-pass: only commit clearly dominant peaks
   bpmFallback: 35,                // "no music" slow idle tempo
   bpmMin: 50,
   bpmMax: 180,
@@ -47,7 +46,13 @@ window.GROWLY_CONFIG = {
   // existing lock — protects against a single bridge / bar where the
   // algorithm latches onto a syncopated harmonic.
   bpmOutlierTolerance: 0.15,
-  bpmOutlierConfirmations: 3,
+  bpmOutlierConfirmations: 5,
+  // Silence-based reset. If the smoothed mic level stays below
+  // intensityThreshold for this long, we drop the lock and revert to
+  // bpmFallback. This is the only thing that resets the tempo — silence
+  // BETWEEN confident estimates (e.g., a quiet bridge in a song) doesn't
+  // count, only actual quiet does.
+  silenceResetMs: 15000,
 
   // ----- Bounce vertical amplitude (intensity-driven) -----
   bounceMinAmpPx: 0.5,            // tiny when silent — barely a jiggle
@@ -56,13 +61,11 @@ window.GROWLY_CONFIG = {
   // ----- Bounce deformation (intensity-driven) -----
   // Selects which sprite frames cycle through during a bounce, so the
   // *amount* of stretch/squash also scales with how loud the music is.
-  // Below intensityToFlatten: only NEUTRAL (no shape change).
-  // Below intensityToMidStretch: NEUTRAL except mid-stretch on the apex.
-  // Below intensityToFullStretch: NEUTRAL with full stretch on the apex.
-  // Above: full NEUTRAL → STRETCH → NEUTRAL → SQUASH cycle.
-  intensityToFlatten: 0.15,
-  intensityToMidStretch: 0.4,
-  intensityToFullStretch: 0.7,
+  // Even silent: mid-stretch on the apex (a gentle breathing animation).
+  // Below intensityToFullStretch: full stretch on the apex, no squash.
+  // Above intensityToFullSquash: full NEUTRAL → STRETCH → NEUTRAL → SQUASH.
+  intensityToFullStretch: 0.4,
+  intensityToFullSquash: 0.7,
 
   // ----- Horizontal sway (kicks in when the music gets fast) -----
   swayBpmThreshold: 105,          // sway begins above this BPM

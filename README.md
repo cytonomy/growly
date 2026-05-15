@@ -24,7 +24,7 @@ All tunable parameters live in `config.js` (window.GROWLY_CONFIG). Edit, refresh
 Notable knobs:
 
 - `bounceMinAmpPx` / `bounceMaxAmpPx` — vertical bounce range
-- `intensityToFlatten` / `intensityToMidStretch` / `intensityToFullStretch` — thresholds where each level of deformation kicks in
+- `intensityToFullStretch` / `intensityToFullSquash` — thresholds where each level of deformation kicks in (silent floor is *always* a gentle apex stretch — Growly never goes static)
 - `swayBpmThreshold` / `swayMaxAmpPx` / `swayBeatsPerCycle` — horizontal sway behavior
 - `bpmConfidenceThreshold` — how dominant the autocorrelation peak must be before we commit a new tempo
 - `bpmOutlierTolerance` / `bpmOutlierConfirmations` — guards against single-bar octave-error spikes
