@@ -12,7 +12,8 @@ window.GROWLY_CONFIG = {
 
   // ----- Mic input -----
   micGain: 30,                    // calibrated so typical room-listening volume reaches ~80% intensity
-  micSmoothing: 0.08,
+  micSmoothing: 0.08,             // EMA factor on intensity used by bounce/sway (fast)
+  levelDisplaySmoothing: 0.04,    // EMA factor on the HUD level% readout (slow — keeps it from flickering)
   fftSize: 2048,
 
   // ----- Pitch → hue (dominant frequency drives rainbow position) -----

@@ -171,7 +171,8 @@ let micAnalyser = null;
 let micBuffer = null;         // time-domain (RMS)
 let freqBuf = null;           // frequency-domain (centroid + ODF)
 let micActive = false;
-let smoothedLevel = 0;        // intensity
+let smoothedLevel = 0;        // intensity (drives bounce/sway/etc — fast EMA)
+let displayLevel = 0;         // intensity for the HUD readout — slower EMA so the % doesn't flicker
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -214,6 +215,7 @@ function draw() {
   const rawLevel = readMicRms();
   const targetLevel = Math.min(1, rawLevel * cfg.micGain);
   smoothedLevel += (targetLevel - smoothedLevel) * cfg.micSmoothing;
+  displayLevel += (smoothedLevel - displayLevel) * cfg.levelDisplaySmoothing;
   const intensity = smoothedLevel;
 
   // Pitch + beat analysis from FFT (updates smoothedPitchHue + detectedBpm).
@@ -284,7 +286,7 @@ function drawHud() {
   const lines = [
     `BPM   ${micActive ? Math.round(detectedBpm) : '—'}`,
     `pitch ${Math.round(smoothedPitchHue)}°`,
-    `level ${(smoothedLevel * 100).toFixed(0)}%`,
+    `level ${(displayLevel * 100).toFixed(0)}%`,
     `odf   ${odfSampleCount}/${cfg.odfBufferSize}`,
     `fps   ${(1000 / avgAnalysisDt).toFixed(0)}`,
   ];

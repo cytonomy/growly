@@ -11,7 +11,7 @@ Live: <https://cytonomy.github.io/growly/>
 | **Pitch** (dominant frequency) | Sets his **color**. Bass-heavy → red end of the rainbow; bright/treble → violet end. Spectral centroid over 80–5000 Hz, log-scale into the [0°, 300°] hue range. |
 | **Volume / intensity** | Sets the **height of his jiggle** *and* the **amount he stretches/squashes**. Quiet → barely-there bob with no shape change. Loud → full launch + dramatic stretch on the way up + squash on landing. |
 | **BPM** | Sets the **speed of his jiggle** — one bounce per beat. Detected via spectral-flux ODF + autocorrelation with comb filter, Gaussian prior, confidence gating, median smoothing, outlier rejection, and tempo octave folding into 80–160 BPM. |
-| **High BPM** | Above ~105 BPM, Growly adds a **horizontal sway** to his bounce path that grows with tempo and intensity. One full left-right-left over four beats. |
+| **High BPM** | Above ~105 BPM, each bounce **arcs from one landing side to the other**, alternating L↔R. He lands at the new side, holds there during the ground portion of the cycle, then takes off into the next arc the other way. Net drift is zero. Arc spread grows with tempo and intensity. |
 | **No music / silence** | Defaults to a **slow micro-jiggle** (~35 BPM, sub-pixel lift, NEUTRAL frame only) so he's never completely still. |
 | **Click / tap** | Hops toward the click point in a series of arc'd jumps (independent of the audio loop). Mobile-friendly: works on touch. |
 
@@ -23,11 +23,15 @@ All tunable parameters live in `config.js` (window.GROWLY_CONFIG). Edit, refresh
 
 Notable knobs:
 
-- `bounceMinAmpPx` / `bounceMaxAmpPx` — vertical bounce range
+- `bounceMinAmpPx` / `bounceMaxAmpPx` — vertical bounce range (top end is dramatic on loud music)
 - `intensityToFullStretch` / `intensityToFullSquash` — thresholds where each level of deformation kicks in (silent floor is *always* a gentle apex stretch — Growly never goes static)
-- `swayBpmThreshold` / `swayMaxAmpPx` / `swayBeatsPerCycle` — horizontal sway behavior
+- `swayBpmThreshold` / `swayMaxAmpPx` — when the per-bounce L↔R arc kicks in and how wide the landing spread is (half-width in sprite-pixels)
+- `micGain` — calibrate so typical room volume reads ~80% on the HUD; clipping at 100% is fine
+- `micSmoothing` — EMA on intensity used by bounce/sway (fast; lower = smoother)
+- `levelDisplaySmoothing` — EMA on the HUD `level%` readout only (slower; keeps the number from flickering while the animation stays responsive)
 - `bpmConfidenceThreshold` — how dominant the autocorrelation peak must be before we commit a new tempo
-- `bpmOutlierTolerance` / `bpmOutlierConfirmations` — guards against single-bar octave-error spikes
+- `bpmOutlierTolerance` / `bpmOutlierConfirmations` / `bpmOutlierStabilityStdMax` — once locked, an alternative tempo must (a) drift far enough, (b) repeat for `bpmOutlierConfirmations × bpmEstimateIntervalMs` worth of estimates, and (c) cluster tightly (std under `bpmOutlierStabilityStdMax`) before it can flush the lock. Random mic noise scatters too widely to ever pass.
+- `silenceResetMs` — how long the room must be quiet before Growly drops his current tempo lock and reverts to `bpmFallback`
 - `bpmFallback` — silent-default BPM
 - `bodySaturation` / `bodyLightness` (and rim/shadow/eye variants) — palette mood
 
