@@ -11,7 +11,7 @@ window.GROWLY_CONFIG = {
   arrivePx: 2,
 
   // ----- Mic input -----
-  micGain: 30,                    // calibrated so typical room-listening volume reaches ~80% intensity
+  micGain: 60,                    // calibrated so typical room-listening volume reaches ~70-80% intensity (raw mic RMS × this)
   micSmoothing: 0.08,             // EMA factor on intensity used by bounce/sway (fast)
   levelDisplaySmoothing: 0.04,    // EMA factor on the HUD level% readout (slow — keeps it from flickering)
   fftSize: 2048,
@@ -48,7 +48,8 @@ window.GROWLY_CONFIG = {
   // octave folding into [bpmOctaveMin, bpmOctaveMax].
   odfFreqMinHz: 60,
   odfFreqMaxHz: 4000,
-  odfBufferSize: 256,             // ~4.3 sec of recent onsets at 60 Hz (analysis starts at half-full → ~2s warmup before first lock attempt)
+  odfBufferSize: 256,             // max ~4.3 sec of recent onsets at 60 Hz
+  odfWarmupFrames: 32,            // start estimating once ~0.5s of onset data is buffered (analysis uses whatever slice is populated, not the full buffer)
   bpmEstimateIntervalMs: 400,
   bpmHistorySize: 24,
   bpmPriorCenter: 110,
@@ -92,7 +93,7 @@ window.GROWLY_CONFIG = {
   // bounce so Growly stays roughly centered. swayMaxAmpPx is the half-width
   // of the L–R landing spread.
   swayBpmThreshold: 105,          // sway begins above this BPM
-  swayMaxAmpPx: 14,               // peak side-to-side travel in sprite-pixels (half-spread between landing spots)
+  swayMaxAmpPx: 24,               // peak side-to-side travel in sprite-pixels (half-spread between landing spots)
 
   // ----- Debug overlay -----
   showHud: true,

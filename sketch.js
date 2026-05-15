@@ -421,7 +421,7 @@ function analyzeSpectrum(now) {
   lastAnalysisMs = now;
 
   // ---------- Periodic tempo estimation ----------
-  const haveEnough = odfSampleCount >= odfBuffer.length / 2;
+  const haveEnough = odfSampleCount >= cfg.odfWarmupFrames;
   const dueForUpdate = now - lastTempoEstMs >= cfg.bpmEstimateIntervalMs;
   if (haveEnough && dueForUpdate && smoothedLevel >= cfg.silenceResetIntensity) {
     lastTempoEstMs = now;
@@ -505,11 +505,18 @@ function stdDevOf(arr) {
 // dominant peak (real beat), ~1 means the autocorrelation is flat (noise
 // or a section with no clear rhythm).
 function estimateTempoFromOdf(fps) {
-  const N = odfBuffer.length;
+  // Use only the actually-populated portion of the ring buffer so early
+  // estimates (when the buffer is partially filled) operate on real data
+  // instead of leading zeros.
+  const N = Math.min(odfSampleCount, odfBuffer.length);
+  if (N < 8) return { bpm: 0, confidence: 0 };
 
-  // Linearize ring buffer from oldest to newest.
+  // Linearize ring buffer from oldest to newest of the populated samples.
   const odf = new Float32Array(N);
-  for (let i = 0; i < N; i++) odf[i] = odfBuffer[(odfHead + i) % N];
+  const start = odfSampleCount < odfBuffer.length
+    ? (odfHead - N + odfBuffer.length) % odfBuffer.length
+    : odfHead;
+  for (let i = 0; i < N; i++) odf[i] = odfBuffer[(start + i) % odfBuffer.length];
 
   // Subtract mean (removes DC bias from the correlation).
   let mean = 0;
