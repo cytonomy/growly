@@ -99,6 +99,9 @@ window.GROWLY_CONFIG = {
   eyeShiftMaxPx: 1,               // max horizontal pupil offset in sprite-pixels (eyes are 2 wide; ±1 looks natural)
   eyeShiftPeriodMs: 2800,         // one full L → R → L cycle every this many ms
 
+  // ----- Face tracking -----
+  faceInferenceMinGapMs: 80,      // minimum time between face-mesh inferences (~12 Hz cap so the model doesn't starve Growly's draw loop)
+
   // ----- Debug overlay -----
   showHud: true,
 

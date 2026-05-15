@@ -873,28 +873,28 @@ async function ensureFaceTracker() {
     await faceMesh.initialize();
     console.log('Growly face: ready');
 
-    // Event-driven pacing: requestVideoFrameCallback fires once per actual
-    // new camera frame (~30 Hz). After each frame we async-send to FaceMesh
-    // and only re-arm the callback once the send resolves, so we never
-    // pile up work the model can't keep up with.
-    const useRVFC = typeof faceVideo.requestVideoFrameCallback === 'function';
+    // Throttled inference loop. Face mesh inference is heavy (~30-80 ms per
+    // call on lower-spec machines), so we cap to ~12 Hz (cfg.faceInferenceMinGapMs)
+    // — plenty for tracking a slowly-moving human face and a fraction of the
+    // CPU budget compared to running every camera frame. inflight guards
+    // against piling up work the model can't finish in time.
     let inflight = false;
     function pump() {
       if (!faceTrackingActive || !faceMesh || !faceVideo) return;
       if (inflight) return;
       inflight = true;
+      const t0 = performance.now();
       faceMesh.send({ image: faceVideo })
         .catch((e) => console.warn('Growly face send failed', e))
         .finally(() => {
           inflight = false;
-          if (faceTrackingActive && faceVideo) {
-            if (useRVFC) faceVideo.requestVideoFrameCallback(pump);
-            else setTimeout(pump, 33);
-          }
+          if (!faceTrackingActive) return;
+          const elapsed = performance.now() - t0;
+          const delay = Math.max(0, cfg.faceInferenceMinGapMs - elapsed);
+          setTimeout(pump, delay);
         });
     }
-    if (useRVFC) faceVideo.requestVideoFrameCallback(pump);
-    else setTimeout(pump, 33);
+    setTimeout(pump, 0);
 
     return true;
   } catch (e) {
@@ -912,18 +912,21 @@ function drawFaceWireframe() {
   stroke(120, 255, 180, 200);
   strokeWeight(1);
   // Mirror x: webcam shows the user as a selfie, so we flip to match the
-  // mental "mirror image" expectation.
+  // mental "mirror image" expectation. All ~2700 tesselation edges are batched
+  // into a single LINES shape — drawing them with individual line() calls
+  // tanked frame rate on weaker GPUs.
   if (tess && tess.length) {
+    beginShape(LINES);
     for (let i = 0; i < tess.length; i++) {
       const pair = tess[i];
       const a = lm[pair[0]];
       const b = lm[pair[1]];
       if (!a || !b) continue;
-      line((1 - a.x) * width, a.y * height, (1 - b.x) * width, b.y * height);
+      vertex((1 - a.x) * width, a.y * height);
+      vertex((1 - b.x) * width, b.y * height);
     }
+    endShape();
   } else {
-    // Fallback: tesselation constant not exposed by this CDN bundle — just
-    // dot every landmark.
     noStroke();
     fill(120, 255, 180, 220);
     for (let i = 0; i < lm.length; i++) {
