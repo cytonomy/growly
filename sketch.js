@@ -325,32 +325,40 @@ function draw() {
   if (!isFinite(renderX) || renderX < -SPRITE_W * cfg.renderScale || renderX > width + SPRITE_W * cfg.renderScale) renderX = width / 2;
   if (!isFinite(renderY) || renderY < -SPRITE_H * cfg.renderScale || renderY > height + SPRITE_H * cfg.renderScale) renderY = height / 2;
 
-  // Eye direction: when face tracking is on AND a face is visible, the
-  // highlight on each eye points at the midpoint between the user's eyes
-  // (landmarks 133 + 362) — same point we draw the red tracker dot at, so
-  // the gaze visibly locks to the dot. When no face is detected, fall back
-  // to an idle L↔R sine wander on X only.
+  // Eye direction: depends on trackingMode.
+  //   'face' — pupils point at the midpoint between the user's eyes; eye
+  //            vector derived from face-on-canvas minus Growly's position,
+  //            deadzone-normalized.
+  //   'gaze' — pupils mirror where the user's IRISES are pointing inside
+  //            their sockets. No deadzone; the raw normalized gaze
+  //            vector drives the highlight directly (with EMA smoothing
+  //            against jitter).
+  // When tracking is off or the model isn't ready, fall back to an idle
+  // L↔R sine wander on X only.
   let eyeTx = 0, eyeTy = 0;
-  let faceMid = null;
+  let targetTx = null, targetTy = null;
   if (faceTrackingActive && lastFaceLandmarks) {
-    faceMid = faceEyeMidpoint(lastFaceLandmarks);
+    if (trackingMode === 'gaze') {
+      const gv = irisGazeVector(lastFaceLandmarks);
+      if (gv) { targetTx = gv.x; targetTy = gv.y; }
+    } else {
+      const faceMid = faceEyeMidpoint(lastFaceLandmarks);
+      if (faceMid) {
+        const faceCanvasX = (1 - faceMid.x) * width;
+        const faceCanvasY = faceMid.y * height;
+        const dead = cfg.faceFollowDeadzone * Math.min(width, height);
+        targetTx = Math.max(-1, Math.min(1, (faceCanvasX - renderX) / dead));
+        targetTy = Math.max(-1, Math.min(1, (faceCanvasY - renderY) / dead));
+      }
+    }
   }
-  if (faceMid) {
-    // Tracker dot is rendered at ((1-x)*width, y*height) so the face's
-    // canvas position uses the same mapping — that way the direction
-    // vector is consistent with what the user sees.
-    const faceCanvasX = (1 - faceMid.x) * width;
-    const faceCanvasY = faceMid.y * height;
-    const targetVecX = faceCanvasX - renderX;
-    const targetVecY = faceCanvasY - renderY;
-    smoothedFaceVecX += (targetVecX - smoothedFaceVecX) * cfg.faceFollowSmoothing;
-    smoothedFaceVecY += (targetVecY - smoothedFaceVecY) * cfg.faceFollowSmoothing;
-    // Deadzone in pixels — eyes hit full deflection once the face is at
-    // least this many canvas-pixels away in that axis. Normalized tx/ty
-    // are passed straight to drawSlime so they sweep the FULL pupil.
-    const dead = cfg.faceFollowDeadzone * Math.min(width, height);
-    eyeTx = Math.max(-1, Math.min(1, smoothedFaceVecX / dead));
-    eyeTy = Math.max(-1, Math.min(1, smoothedFaceVecY / dead));
+  if (targetTx !== null) {
+    // Reuse the existing smoothing state — it holds an EMA in normalized
+    // [-1, +1] units regardless of which mode produced the target.
+    smoothedFaceVecX += (targetTx - smoothedFaceVecX) * cfg.faceFollowSmoothing;
+    smoothedFaceVecY += (targetTy - smoothedFaceVecY) * cfg.faceFollowSmoothing;
+    eyeTx = Math.max(-1, Math.min(1, smoothedFaceVecX));
+    eyeTy = Math.max(-1, Math.min(1, smoothedFaceVecY));
   } else {
     const eyePhase = (now / cfg.eyeShiftPeriodMs) * Math.PI * 2;
     eyeTx = Math.sin(eyePhase);
@@ -908,6 +916,11 @@ function windowResized() {
 // ON by default; actual init (webcam + WASM) is deferred until the first
 // user gesture since getUserMedia requires one. Toggling the button OFF then
 // ON re-arms the pump loop without re-initializing the mesh.
+// 'face' = follow the midpoint between the user's eyes (head position);
+// 'gaze' = follow the iris's offset within the eye socket (looking direction).
+// Both share the same FaceMesh stream — gaze mode just consumes iris
+// landmarks (indices 468 + 473), which require refineLandmarks: true.
+let trackingMode = 'face';
 let faceMesh = null;
 let faceVideo = null;
 let faceTrackingActive = true;
@@ -945,7 +958,10 @@ async function ensureFaceTracker() {
       });
       mesh.setOptions({
         maxNumFaces: 2,
-        refineLandmarks: false,
+        // refineLandmarks=true adds 10 iris landmarks (468-477). Costs a
+        // small amount of CPU per frame but lets gaze mode compute where
+        // each iris sits inside its eye socket.
+        refineLandmarks: true,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
       });
@@ -1014,24 +1030,30 @@ function startFacePump() {
 
 function updateFaceButton() {
   const btn = document.getElementById('face-toggle');
-  if (!btn) return;
-  if (faceTrackingActive && faceMesh) {
-    btn.classList.add('on');
-    btn.textContent = 'Face tracking: ON';
-  } else if (faceTrackingActive && !faceMesh) {
-    btn.classList.remove('on');
-    btn.textContent = 'Face tracking: ON (tap Growly)';
-  } else {
-    btn.classList.remove('on');
-    btn.textContent = 'Face tracking: OFF';
+  if (btn) {
+    if (faceTrackingActive && faceMesh) {
+      btn.classList.add('on');
+      btn.textContent = 'Face tracking: ON';
+    } else if (faceTrackingActive && !faceMesh) {
+      btn.classList.remove('on');
+      btn.textContent = 'Face tracking: ON (tap Growly)';
+    } else {
+      btn.classList.remove('on');
+      btn.textContent = 'Face tracking: OFF';
+    }
+  }
+  // Mode toggle is only meaningful while tracking is active.
+  const modeBtn = document.getElementById('mode-toggle');
+  if (modeBtn) {
+    modeBtn.hidden = !faceTrackingActive;
+    modeBtn.textContent = trackingMode === 'gaze' ? 'Mode: Gaze' : 'Mode: Face';
+    modeBtn.classList.toggle('gaze', trackingMode === 'gaze');
   }
 }
 
 // Midpoint between MediaPipe landmark 133 (left eye inner corner) and 362
-// (right eye inner corner) in normalized face-mesh coords. Same point is
-// used as the eye-follow target and the position of the red tracker dot,
-// so Growly's gaze visibly locks to the dot. Returns null if either
-// landmark is missing from this frame.
+// (right eye inner corner) in normalized face-mesh coords. Used as the
+// face-position target in 'face' mode.
 function faceEyeMidpoint(lm) {
   if (!lm) return null;
   const a = lm[133];
@@ -1040,15 +1062,66 @@ function faceEyeMidpoint(lm) {
   return { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
 }
 
+// Iris-based gaze direction. Returns null if iris landmarks (468/473)
+// aren't present — they only show up when FaceMesh is initialized with
+// refineLandmarks: true.
+//
+// For each eye we measure where the iris center sits within the eye
+// socket (outer corner ↔ inner corner horizontally, top ↔ bottom
+// vertically), normalize to [-1, +1], then average the two eyes.
+//
+// The X sign is flipped vs. raw face-mesh because the canvas is mirrored
+// (selfie view): when the user looks toward their left ear, the iris
+// moves to the right in the raw image but to the left in what the user
+// sees on screen — and Growly should mirror what the user sees.
+function irisGazeVector(lm) {
+  if (!lm) return null;
+  function eyeGaze(outer, inner, top, bot, iris) {
+    if (!outer || !inner || !top || !bot || !iris) return null;
+    const cx = (outer.x + inner.x) * 0.5;
+    const cy = (top.y + bot.y) * 0.5;
+    const halfW = Math.abs(inner.x - outer.x) * 0.5;
+    const halfH = Math.abs(bot.y - top.y) * 0.5;
+    if (halfW < 1e-6 || halfH < 1e-6) return null;
+    return { x: (iris.x - cx) / halfW, y: (iris.y - cy) / halfH };
+  }
+  const lg = eyeGaze(lm[33],  lm[133], lm[159], lm[145], lm[468]);
+  const rg = eyeGaze(lm[263], lm[362], lm[386], lm[374], lm[473]);
+  if (!lg && !rg) return null;
+  const avgX = lg && rg ? (lg.x + rg.x) * 0.5 : (lg || rg).x;
+  const avgY = lg && rg ? (lg.y + rg.y) * 0.5 : (lg || rg).y;
+  // Gain: a user's max gaze typically moves the iris ~30-40% of the
+  // socket half-width. Scale by ~2.5 so pegging at the edge of the eye
+  // pegs Growly's pupil.
+  const GAIN = 2.5;
+  return {
+    x: Math.max(-1, Math.min(1, -avgX * GAIN)),
+    y: Math.max(-1, Math.min(1,  avgY * GAIN)),
+  };
+}
+
+// Where the red tracker dot is drawn in each mode, in normalized
+// face-mesh coords. Returns null if the required landmarks are absent.
+function trackerDotPoint(lm) {
+  if (!lm) return null;
+  if (trackingMode === 'gaze') {
+    const a = lm[468];
+    const b = lm[473];
+    if (a && b) return { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
+    // Fall through to face-midpoint if iris landmarks aren't ready yet.
+  }
+  return faceEyeMidpoint(lm);
+}
+
 function drawFaceTrackerDot() {
   if (!lastFaceLandmarks) return;
-  const mid = faceEyeMidpoint(lastFaceLandmarks);
-  if (!mid) return;
+  const pt = trackerDotPoint(lastFaceLandmarks);
+  if (!pt) return;
   push();
   noStroke();
   fill(255, 60, 60, 230);
   // Mirror x to match the selfie-flipped mapping used everywhere else.
-  circle((1 - mid.x) * width, mid.y * height, 6);
+  circle((1 - pt.x) * width, pt.y * height, 6);
   pop();
 }
 
@@ -1082,4 +1155,17 @@ window.addEventListener('DOMContentLoaded', () => {
       updateFaceButton();
     }
   });
+
+  const modeBtn = document.getElementById('mode-toggle');
+  if (modeBtn) {
+    modeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      trackingMode = trackingMode === 'gaze' ? 'face' : 'gaze';
+      // Clear smoothing state so a mode switch doesn't bleed the old
+      // mode's vector into the new mode's first few frames.
+      smoothedFaceVecX = 0;
+      smoothedFaceVecY = 0;
+      updateFaceButton();
+    });
+  }
 });
