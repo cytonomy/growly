@@ -46,7 +46,8 @@ window.GROWLY_CONFIG = {
   // existing lock — protects against a single bridge / bar where the
   // algorithm latches onto a syncopated harmonic.
   bpmOutlierTolerance: 0.15,
-  bpmOutlierConfirmations: 7,
+  bpmOutlierConfirmations: 15,         // many outliers needed before reconsidering the lock
+  bpmOutlierStabilityStdMax: 8,        // …and they must agree (std < this BPM) — random noise spikes vary too much to pass
   // Silence-based reset. If the smoothed mic level stays below
   // intensityThreshold for this long, we drop the lock and revert to
   // bpmFallback. This is the only thing that resets the tempo — silence

@@ -368,11 +368,19 @@ function analyzeSpectrum(now) {
         ? Math.abs(rawBpm - currentMedian) / currentMedian
         : 0;
       if (currentMedian > 0 && drift > cfg.bpmOutlierTolerance) {
-        // Outlier — needs to repeat consecutively before flushing the lock.
+        // Outlier — needs many AND-stable confirmations before flushing the
+        // lock. Random ambient-noise spikes scatter across many BPMs and won't
+        // ever form a tight cluster, so they can't fool the algorithm into
+        // flipping the lock.
         outlierCandidates.push(rawBpm);
         if (outlierCandidates.length >= cfg.bpmOutlierConfirmations) {
-          tempoEstimates = outlierCandidates.slice();
-          outlierCandidates = [];
+          const std = stdDevOf(outlierCandidates);
+          if (std < cfg.bpmOutlierStabilityStdMax) {
+            tempoEstimates = outlierCandidates.slice();
+            outlierCandidates = [];
+          } else {
+            outlierCandidates.shift();  // drop oldest; let the cluster settle
+          }
         }
       } else {
         outlierCandidates.length = 0;
@@ -405,6 +413,19 @@ function medianOf(arr) {
   if (!arr || !arr.length) return 0;
   const sorted = arr.slice().sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
+}
+
+function stdDevOf(arr) {
+  if (!arr || arr.length < 2) return 0;
+  let mean = 0;
+  for (let i = 0; i < arr.length; i++) mean += arr[i];
+  mean /= arr.length;
+  let sumSq = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const d = arr[i] - mean;
+    sumSq += d * d;
+  }
+  return Math.sqrt(sumSq / arr.length);
 }
 
 // Autocorrelate the ODF buffer to estimate beat period; convert to BPM.
