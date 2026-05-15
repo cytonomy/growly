@@ -190,7 +190,10 @@ let swayLandSide = 1;         // alternates ±1 each landing — Growly arcs L�
 let smoothedR = 0;            // smoothed RGB color from 3-band energy mix
 let smoothedG = 0;
 let smoothedB = 0;
-let smoothedFaceX = 0.5;      // smoothed mirrored x of the biggest detected face ([0,1], 0.5 = centered)
+// Smoothed direction vector from Growly to the biggest detected face, in pixels.
+// Used to point both the X (left/right) and Y (up/down) eye-highlight position.
+let smoothedFaceVecX = 0;
+let smoothedFaceVecY = 0;
 let detectedBpm = 0;          // smoothed tempo from autocorrelation
 let tempoEstimates = [];      // rolling buffer of recent raw BPM estimates
 let outlierCandidates = [];   // recent confident estimates that are far from the median
@@ -317,25 +320,40 @@ function draw() {
   if (!isFinite(renderX) || renderX < -SPRITE_W * cfg.renderScale || renderX > width + SPRITE_W * cfg.renderScale) renderX = width / 2;
   if (!isFinite(renderY) || renderY < -SPRITE_H * cfg.renderScale || renderY > height + SPRITE_H * cfg.renderScale) renderY = height / 2;
 
-  // Eye shift: if face tracking is active and we see a face, the eyes follow
-  // the (smoothed) mirrored x of the biggest detected face. Otherwise fall
-  // back to a slow idle L↔R glance.
-  let eyeShiftRaw = 0;
+  // Eye direction: when face tracking is on AND a face is visible, the
+  // highlight on each eye points in the direction of (face_on_canvas - Growly).
+  // When no face is detected, fall back to the idle L↔R sine wander on X only.
+  let eyeShiftX = 0, eyeShiftY = 0;
   if (faceTrackingActive && lastFaceLandmarks) {
-    let sx = 0;
-    for (let i = 0; i < lastFaceLandmarks.length; i++) sx += lastFaceLandmarks[i].x;
-    const faceCx = sx / lastFaceLandmarks.length;
-    const mirrored = 1 - faceCx;                  // selfie POV
-    smoothedFaceX += (mirrored - smoothedFaceX) * cfg.faceFollowSmoothing;
-    const offset = smoothedFaceX - 0.5;           // [-0.5, +0.5]
-    const t = Math.max(-1, Math.min(1, offset / cfg.faceFollowDeadzone));
-    eyeShiftRaw = t * cfg.eyeShiftMaxPx;
+    let sx = 0, sy = 0;
+    for (let i = 0; i < lastFaceLandmarks.length; i++) {
+      sx += lastFaceLandmarks[i].x;
+      sy += lastFaceLandmarks[i].y;
+    }
+    const faceXn = sx / lastFaceLandmarks.length;
+    const faceYn = sy / lastFaceLandmarks.length;
+    // Wireframe is rendered at ((1-x)*width, y*height) so the face's canvas
+    // position uses the same mapping — that way the direction vector is
+    // consistent with what the user sees.
+    const faceCanvasX = (1 - faceXn) * width;
+    const faceCanvasY = faceYn * height;
+    const targetVecX = faceCanvasX - renderX;
+    const targetVecY = faceCanvasY - renderY;
+    smoothedFaceVecX += (targetVecX - smoothedFaceVecX) * cfg.faceFollowSmoothing;
+    smoothedFaceVecY += (targetVecY - smoothedFaceVecY) * cfg.faceFollowSmoothing;
+    // Deadzone in pixels — the eyes hit full deflection once the face is
+    // at least this many canvas-pixels away in that axis.
+    const dead = cfg.faceFollowDeadzone * Math.min(width, height);
+    const tx = Math.max(-1, Math.min(1, smoothedFaceVecX / dead));
+    const ty = Math.max(-1, Math.min(1, smoothedFaceVecY / dead));
+    eyeShiftX = Math.round(tx * cfg.eyeShiftMaxPx);
+    eyeShiftY = Math.round(ty * cfg.eyeShiftMaxYPx);
   } else {
     const eyePhase = (now / cfg.eyeShiftPeriodMs) * Math.PI * 2;
-    eyeShiftRaw = Math.sin(eyePhase) * cfg.eyeShiftMaxPx;
+    eyeShiftX = Math.round(Math.sin(eyePhase) * cfg.eyeShiftMaxPx);
+    eyeShiftY = 0;
   }
-  const eyeShift = Math.round(eyeShiftRaw);
-  drawSlime(renderX, renderY, frame, palette, eyeShift);
+  drawSlime(renderX, renderY, frame, palette, eyeShiftX, eyeShiftY);
 
   if (faceTrackingActive) drawFaceWireframe();
 
@@ -688,13 +706,14 @@ function eyeBoxesFor(frame) {
   return boxes;
 }
 
-function drawSlime(cx, cy, frame, palette, eyeShift) {
+function drawSlime(cx, cy, frame, palette, eyeShiftX, eyeShiftY) {
   // Defensive: never let a bad input silently make Growly invisible.
   if (!isFinite(cx)) cx = width / 2;
   if (!isFinite(cy)) cy = height / 2;
   if (!frame || !Array.isArray(frame) || frame.length !== SPRITE_H) frame = F_NEUTRAL;
   if (!palette || !palette[1]) palette = paletteForRgb(cfg.ambientRgb[0], cfg.ambientRgb[1], cfg.ambientRgb[2]);
-  if (!Number.isInteger(eyeShift)) eyeShift = 0;
+  if (!Number.isInteger(eyeShiftX)) eyeShiftX = 0;
+  if (!Number.isInteger(eyeShiftY)) eyeShiftY = 0;
 
   const s = cfg.renderScale;
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
@@ -715,18 +734,22 @@ function drawSlime(cx, cy, frame, palette, eyeShift) {
     }
   }
 
-  // Pass 2: paint the highlight (color 7) on the top row of each pupil
-  // cluster, at xLo + 1 + eyeShift — so eyeShift = -1 puts the white on
-  // the left column of the pupil (looking left), 0 = center, +1 = right.
+  // Pass 2: paint the highlight (color 7) inside each pupil cluster at
+  // (centerCol + eyeShiftX, centerRow + eyeShiftY). centerRow is biased one
+  // cell below the top of the pupil (anime convention: highlight sits in
+  // the upper-half of the iris when looking straight ahead).
   const boxes = eyeBoxesFor(frame);
   const hi = palette[7];
   if (hi && boxes.length) {
     fill(hi);
     for (const b of boxes) {
-      const w = b.xHi - b.xLo;        // pupil width in cells minus 1
+      const w = b.xHi - b.xLo;
+      const h = b.yHi - b.yLo;
       const centerCol = b.xLo + Math.floor(w / 2);
-      const col = Math.max(b.xLo, Math.min(b.xHi, centerCol + eyeShift));
-      rect(ox + col * s, oy + b.yLo * s, s, s);
+      const centerRow = b.yLo + Math.max(0, Math.floor(h / 2) - 1);
+      const col = Math.max(b.xLo, Math.min(b.xHi, centerCol + eyeShiftX));
+      const row = Math.max(b.yLo, Math.min(b.yHi, centerRow + eyeShiftY));
+      rect(ox + col * s, oy + row * s, s, s);
     }
   }
 }

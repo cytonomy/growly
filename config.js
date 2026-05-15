@@ -97,7 +97,8 @@ window.GROWLY_CONFIG = {
 
   // ----- Idle eye animation -----
   // Used when face tracking is OFF or no face is in view.
-  eyeShiftMaxPx: 1,               // max horizontal pupil offset in sprite-pixels (3-wide pupil = ±1)
+  eyeShiftMaxPx:  1,              // max horizontal highlight offset inside the pupil (3-wide pupil → ±1)
+  eyeShiftMaxYPx: 1,              // max vertical highlight offset inside the pupil (4-tall pupil → ±1)
   eyeShiftPeriodMs: 2800,         // one full L → R → L cycle every this many ms
 
   // ----- Face tracking -----
