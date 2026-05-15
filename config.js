@@ -37,7 +37,8 @@ window.GROWLY_CONFIG = {
   ambientRgb: [0.15, 0.35, 1.0],  // shown when smoothedLevel < intensityThreshold (light blue)
   pitchSmoothing: 0.06,           // EMA on the RGB color — lower = slower dwell
   hueFallback: 220,               // hue used only when the smoothed RGB is gray (saturation ≈ 0)
-  intensityThreshold: 0.30,       // bumped from 0.02 — with micGain=30 the silent room reads ~15-25%; this gates pitch detection and arms the silence-reset timer for BPM
+  intensityThreshold: 0.30,       // gates pitch/color: below this, color falls back to ambient blue
+  silenceResetIntensity: 0.08,    // gates BPM silence-reset: only count the room as silent for BPM purposes when smoothedLevel is REALLY low (quiet song sections should NOT trigger reset)
 
   // ----- BPM detection -----
   // Spectral-flux ODF + autocorrelation with comb filter + Gaussian prior

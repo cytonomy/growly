@@ -162,7 +162,13 @@ const F_SQUASH = [
   "000000000000000000000000",
 ];
 
-const IDLE_FRAMES = [F_NEUTRAL, F_STRETCH, F_NEUTRAL, F_SQUASH];
+// Animation cycle keyed to bouncePhase quarters. The lift sine is positive
+// over phase 0→0.5 (airborne) and zero over 0.5→1.0 (on the ground), so:
+//   q0 = ascending  → STRETCH (Growly elongates the moment he launches)
+//   q1 = descending → STRETCH (still in the air, still elongated)
+//   q2 = just landed → SQUASH (compressed from impact)
+//   q3 = on ground   → NEUTRAL (recovered, ready for next takeoff)
+const IDLE_FRAMES = [F_STRETCH, F_STRETCH, F_SQUASH, F_NEUTRAL];
 
 const slime = {
   x: 0, y: 0,
@@ -456,9 +462,10 @@ function analyzeSpectrum(now) {
   }
 
   // Silence-based reset: only drop the lock when the room is *actually* quiet
-  // for a sustained stretch. Quiet sections inside a song don't count because
-  // the lock is held by the median window, not by recent confident estimates.
-  if (smoothedLevel < cfg.intensityThreshold) {
+  // for a sustained stretch. Uses its own lower threshold so quiet sections
+  // inside a song don't reset the lock (the color-ambient threshold above is
+  // higher and serves a different purpose).
+  if (smoothedLevel < cfg.silenceResetIntensity) {
     if (silenceStartMs === 0) silenceStartMs = now;
     if (now - silenceStartMs > cfg.silenceResetMs) {
       tempoEstimates = [];
@@ -576,11 +583,12 @@ function hopFrameAt(t) {
 function frameForIntensity(quarter, intensity) {
   if (!isFinite(intensity)) intensity = 0;
   if (!Number.isInteger(quarter) || quarter < 0 || quarter >= IDLE_FRAMES.length) quarter = 0;
+  const airborne = (quarter === 0 || quarter === 1);
   if (intensity < cfg.intensityToFullStretch) {
-    return quarter === 1 ? F_MID_STRETCH : F_NEUTRAL;
+    return airborne ? F_MID_STRETCH : F_NEUTRAL;
   }
   if (intensity < cfg.intensityToFullSquash) {
-    return quarter === 1 ? F_STRETCH : F_NEUTRAL;
+    return airborne ? F_STRETCH : F_NEUTRAL;
   }
   return IDLE_FRAMES[quarter] || F_NEUTRAL;
 }
