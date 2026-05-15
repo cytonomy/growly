@@ -12,7 +12,7 @@ window.GROWLY_CONFIG = {
 
   // ----- Mic input -----
   micGain: 95,                    // sensitivity bump — typical room-listening volume now pegs near 100% so bounce amplitude reaches the configured max on loud music
-  micSmoothing: 0.08,             // EMA factor on intensity used by bounce/sway (fast)
+  micSmoothing: 0.035,            // EMA factor on intensity used by bounce/sway — lower = slower buildup; 0.035 ≈ 1s to ramp up to a loud peak
   levelDisplaySmoothing: 0.04,    // EMA factor on the HUD level% readout (slow — keeps it from flickering)
   fftSize: 2048,
 
