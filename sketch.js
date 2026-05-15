@@ -150,7 +150,8 @@ let bgBuffer = null;
 let startMs = 0;
 let lastDrawMs = 0;
 let bouncePhase = 0;          // 0..1, integrates over time at the current bounce period
-let swayPhase = 0;            // 0..2π, integrates over time at the current sway period
+let lastBouncePhase = 0;      // detect bounce wrap-around to flip lateral landing side
+let swayLandSide = 1;         // alternates ±1 each landing — Growly arcs L→R→L→R, never drifting
 let smoothedPitchHue = 0;     // smoothed mapping of dominant pitch → hue (deg)
 let detectedBpm = 0;          // smoothed tempo from autocorrelation
 let tempoEstimates = [];      // rolling buffer of recent raw BPM estimates
@@ -184,7 +185,8 @@ function setup() {
   tempoEstimates = [];
   outlierCandidates = [];
   silenceStartMs = 0;
-  swayPhase = 0;
+  lastBouncePhase = 0;
+  swayLandSide = 1;
   odfBuffer = new Float32Array(cfg.odfBufferSize);
   odfHead = 0;
   odfSampleCount = 0;
@@ -241,6 +243,9 @@ function draw() {
     const period = 60000 / bpm;
     bouncePhase = (bouncePhase + dt / period) % 1;
     if (!isFinite(bouncePhase)) bouncePhase = 0;
+    // Detect bounce wrap (landing) → flip lateral side so each new bounce arcs the other way.
+    if (bouncePhase < lastBouncePhase) swayLandSide = -swayLandSide;
+    lastBouncePhase = bouncePhase;
     // Intensity → bounce amplitude AND deformation amount.
     const ampPx = lerp(cfg.bounceMinAmpPx, cfg.bounceMaxAmpPx, intensity);
     const quarter = Math.floor(bouncePhase * IDLE_FRAMES.length) % IDLE_FRAMES.length;
@@ -248,16 +253,17 @@ function draw() {
     // Vertical lift: one positive sine half-arch over the first half of the cycle.
     const lift = Math.max(0, Math.sin(bouncePhase * Math.PI * 2)) * ampPx * cfg.renderScale;
     renderY = slime.y - lift;
-    // Horizontal sway when the music is fast — adds a side-to-side swing.
+    // Horizontal sway when the music is fast — each bounce arcs from the
+    // previous landing side to the opposite side, so Growly hops L → R → L
+    // around his anchor instead of sliding sideways. Net drift is zero.
     if (bpm >= cfg.swayBpmThreshold) {
-      const swayBpm = bpm / cfg.swayBeatsPerCycle;
-      const swayPeriodMs = 60000 / swayBpm;
-      swayPhase = (swayPhase + dt / swayPeriodMs * Math.PI * 2) % (Math.PI * 2);
-      if (!isFinite(swayPhase)) swayPhase = 0;
       const swayBlend = Math.min(1,
         (bpm - cfg.swayBpmThreshold) / Math.max(1, cfg.bpmOctaveMax - cfg.swayBpmThreshold));
       const swayAmp = swayBlend * cfg.swayMaxAmpPx * intensity;
-      renderX = slime.x + Math.sin(swayPhase) * swayAmp * cfg.renderScale;
+      // Linear lerp from -swayLandSide (takeoff foot) to +swayLandSide (landing foot)
+      // gives constant horizontal velocity through the air — physically a parabolic arc.
+      const swayX = lerp(-swayLandSide, swayLandSide, bouncePhase) * swayAmp;
+      renderX = slime.x + swayX * cfg.renderScale;
     }
   }
   // Final guard: never let render coordinates escape the canvas via accumulated

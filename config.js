@@ -69,9 +69,11 @@ window.GROWLY_CONFIG = {
   intensityToFullSquash: 0.7,
 
   // ----- Horizontal sway (kicks in when the music gets fast) -----
+  // Each bounce arcs from one landing side to the other, alternating L↔R per
+  // bounce so Growly stays roughly centered. swayMaxAmpPx is the half-width
+  // of the L–R landing spread.
   swayBpmThreshold: 105,          // sway begins above this BPM
-  swayMaxAmpPx: 6,                // peak side-to-side travel in sprite-pixels
-  swayBeatsPerCycle: 4,           // one full left-right-left over this many beats
+  swayMaxAmpPx: 6,                // peak side-to-side travel in sprite-pixels (half-spread)
 
   // ----- Debug overlay -----
   showHud: true,
