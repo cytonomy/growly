@@ -11,7 +11,7 @@ window.GROWLY_CONFIG = {
   arrivePx: 2,
 
   // ----- Mic input -----
-  micGain: 12,
+  micGain: 30,                    // calibrated so typical room-listening volume reaches ~80% intensity
   micSmoothing: 0.08,
   fftSize: 2048,
 
