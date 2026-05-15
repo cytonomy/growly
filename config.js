@@ -113,6 +113,12 @@ window.GROWLY_CONFIG = {
   faceInferenceMinGapMs: 80,      // minimum time between face-mesh inferences (~12 Hz cap so the model doesn't starve Growly's draw loop)
   faceFollowSmoothing: 0.12,      // EMA on the tracked face position (lower = smoother / less jittery eye following)
   faceFollowDeadzone: 0.25,       // face must be this far from center (in normalized x) before eyes hit their full deflection
+  // ----- Gaze tracking (iris mode only) -----
+  gazeGain: 4.0,                  // iris travel ÷ socket half-width × this → eyeT. Iris typically travels ~30-40% of half-width even at max gaze, so this gain pegs the pupil at real-world max-look.
+  gazeDeadzone: 0.06,             // iris movements within this fraction of socket half-width are zeroed (kills landmark jitter that otherwise looks like twitching)
+  gazeSmoothing: 0.2,             // EMA on the gaze vector — higher than face mode because gaze is jitterier; balances responsiveness vs twitch
+  // ----- Detailed-eye rendering (fine-pixel anime template) -----
+  eyeHires: 3,                    // fine pixels per body cell along each axis inside the eye region. 1 = no detail; 3 = 9× more pixels per cell, used for the outline/sclera/iris/pupil layers.
 
   // ----- Debug overlay -----
   showHud: true,
@@ -122,4 +128,7 @@ window.GROWLY_CONFIG = {
   rimSaturation: 92,     rimLightness: 80,
   shadowSaturation: 75,  shadowLightness: 35,
   eyeSaturation: 55,     eyeLightness: 12,
+  // Eye-detail layers (only used by the fine-pixel template):
+  outlineSaturation: 30, outlineLightness: 6,   // near-black eyelid line (palette index 4)
+  scleraSaturation: 18,  scleraLightness: 92,   // off-white inside the outline (palette index 5)
 };

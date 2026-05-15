@@ -46,6 +46,11 @@ function paletteForRgb(r, g, b) {
     1: color(`hsl(${hi}, ${Math.round(cfg.bodySaturation * k)}%, ${cfg.bodyLightness}%)`),
     2: color(`hsl(${hi}, ${Math.round(cfg.rimSaturation * k)}%, ${cfg.rimLightness}%)`),
     3: color(`hsl(${hi}, ${Math.round(cfg.shadowSaturation * k)}%, ${cfg.shadowLightness}%)`),
+    // Eye-detail layers — only used by the fine-pixel template overlay.
+    // 4 = outline (eyelid line), 5 = sclera (white). The iris (6) and the
+    // movable highlight (7) are the same indices as before.
+    4: color(`hsl(${hi}, ${Math.round(cfg.outlineSaturation * k)}%, ${cfg.outlineLightness}%)`),
+    5: color(`hsl(${hi}, ${Math.round(cfg.scleraSaturation * k)}%, ${cfg.scleraLightness}%)`),
     6: color(`hsl(${hi}, ${Math.round(cfg.eyeSaturation * k)}%, ${cfg.eyeLightness}%)`),
     7: color(`hsl(${hi}, ${Math.round(cfg.bodySaturation * k * 0.4)}%, 92%)`),  // near-white tinted highlight
   };
@@ -194,6 +199,9 @@ let smoothedB = 0;
 // Used to point both the X (left/right) and Y (up/down) eye-highlight position.
 let smoothedFaceVecX = 0;
 let smoothedFaceVecY = 0;
+// Last raw gaze vector (before EMA) — used for the HUD diagnostic in
+// gaze mode so the user can see whether the iris signal is responsive.
+let lastGazeRaw = null;
 let detectedBpm = 0;          // smoothed tempo from autocorrelation
 let tempoEstimates = [];      // rolling buffer of recent raw BPM estimates
 let outlierCandidates = [];   // recent confident estimates that are far from the median
@@ -337,10 +345,17 @@ function draw() {
   // L↔R sine wander on X only.
   let eyeTx = 0, eyeTy = 0;
   let targetTx = null, targetTy = null;
+  let smoothingAlpha = cfg.faceFollowSmoothing;
   if (faceTrackingActive && lastFaceLandmarks) {
+    logIrisOnce(lastFaceLandmarks);
     if (trackingMode === 'gaze') {
       const gv = irisGazeVector(lastFaceLandmarks);
-      if (gv) { targetTx = gv.x; targetTy = gv.y; }
+      if (gv) {
+        targetTx = gv.x;
+        targetTy = gv.y;
+        smoothingAlpha = cfg.gazeSmoothing;
+        lastGazeRaw = gv;
+      }
     } else {
       const faceMid = faceEyeMidpoint(lastFaceLandmarks);
       if (faceMid) {
@@ -353,16 +368,16 @@ function draw() {
     }
   }
   if (targetTx !== null) {
-    // Reuse the existing smoothing state — it holds an EMA in normalized
-    // [-1, +1] units regardless of which mode produced the target.
-    smoothedFaceVecX += (targetTx - smoothedFaceVecX) * cfg.faceFollowSmoothing;
-    smoothedFaceVecY += (targetTy - smoothedFaceVecY) * cfg.faceFollowSmoothing;
+    // EMA state is in normalized [-1, +1] units regardless of mode.
+    smoothedFaceVecX += (targetTx - smoothedFaceVecX) * smoothingAlpha;
+    smoothedFaceVecY += (targetTy - smoothedFaceVecY) * smoothingAlpha;
     eyeTx = Math.max(-1, Math.min(1, smoothedFaceVecX));
     eyeTy = Math.max(-1, Math.min(1, smoothedFaceVecY));
   } else {
     const eyePhase = (now / cfg.eyeShiftPeriodMs) * Math.PI * 2;
     eyeTx = Math.sin(eyePhase);
     eyeTy = 0;
+    if (trackingMode === 'gaze') lastGazeRaw = null;
   }
   drawSlime(renderX, renderY, frame, palette, eyeTx, eyeTy);
 
@@ -379,13 +394,23 @@ function drawHud() {
     `odf   ${odfSampleCount}/${cfg.odfBufferSize}`,
     `fps   ${(1000 / avgAnalysisDt).toFixed(0)}`,
   ];
+  // In gaze mode, append a diagnostic line so the user can see whether
+  // the iris signal is moving at all and how much of it survives the
+  // deadzone+gain pipe.
+  if (faceTrackingActive && trackingMode === 'gaze') {
+    if (lastGazeRaw) {
+      lines.push(`gaze  ${lastGazeRaw.x.toFixed(2)}, ${lastGazeRaw.y.toFixed(2)}`);
+    } else {
+      lines.push(`gaze  no iris`);
+    }
+  }
   push();
   textFont('monospace');
   textSize(14);
   textAlign(LEFT, TOP);
   // Backdrop
   fill(0, 0, 0, 160);
-  rect(8, 8, 130, 18 * lines.length + 10);
+  rect(8, 8, 140, 18 * lines.length + 10);
   fill(255);
   for (let i = 0; i < lines.length; i++) {
     text(lines[i], 14, 14 + i * 18);
@@ -743,6 +768,109 @@ function eyeBoxesFor(frame) {
   return boxes;
 }
 
+// Fine-pixel anime eye template. Used by drawDetailedEye() — rendered at
+// cfg.eyeHires fine pixels per body cell over each body pupil bbox.
+//
+// Width = (pupil cells wide) × eyeHires = 3 × 3 = 9 fine cols.
+// Height = (pupil cells tall) × eyeHires = 6 × 3 = 18 fine rows.
+//
+// Char legend:
+//   .  transparent (body color shows through)
+//   O  eyelid outline (palette[4], near-black)
+//   S  sclera        (palette[5], off-white)
+//   I  iris          (palette[6], saturated body hue)
+//   P  inner pupil   (palette[4], near-black)
+// Highlight (palette[7]) is painted on top, position movable inside the
+// pupil rect [rows 5-12, cols 3-5].
+const EYE_TEMPLATE = [
+  '.OOOOOOO.',
+  'OSSSSSSSO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIPPPISO',
+  'OSIPPPISO',
+  'OSIPPPISO',
+  'OSIPPPISO',
+  'OSIPPPISO',
+  'OSIPPPISO',
+  'OSIPPPISO',
+  'OSIPPPISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSSSSSSSO',
+  '.OOOOOOO.',
+];
+const EYE_TPL_W = 9;
+const EYE_TPL_H = 18;
+// Pupil rect inside the template — where the highlight can roam.
+// Rows 5..12 inclusive, cols 3..5 inclusive. (eyeTx/eyeTy = ±1 maps to
+// the edges of this rect; eyeTx=0 / eyeTy=0 lands near the center.)
+const EYE_PUPIL_X0 = 3, EYE_PUPIL_X1 = 5;
+const EYE_PUPIL_Y0 = 5, EYE_PUPIL_Y1 = 12;
+const EYE_CHAR_TO_IDX = { '.': 0, O: 4, S: 5, I: 6, P: 4 };
+
+// Render one detailed anime eye over a body-cell pupil bbox. Fine pixel
+// boundaries are integer-rounded so adjacent cells don't leave gaps when
+// renderScale / eyeHires is non-integer.
+function drawDetailedEye(b, eyeTx, eyeTy, palette, s, ox, oy) {
+  const hires = cfg.eyeHires;
+  // Verify template fits the bbox — otherwise dimensions are mismatched
+  // and we'd render at the wrong scale. Bail to a chunky fallback if so.
+  const bWcells = b.xHi - b.xLo + 1;
+  const bHcells = b.yHi - b.yLo + 1;
+  if (bWcells * hires !== EYE_TPL_W || bHcells * hires !== EYE_TPL_H) {
+    // Fallback: paint the iris as a single block at body scale + chunky
+    // highlight (the pre-detail behavior).
+    const w = b.xHi - b.xLo;
+    const h = b.yHi - b.yLo;
+    fill(palette[6]);
+    rect(ox + b.xLo * s, oy + b.yLo * s, (w + 1) * s, (h + 1) * s);
+    const hi = palette[7];
+    if (hi) {
+      const col = b.xLo + Math.ceil((eyeTx + 1) * 0.5 * w - 0.5);
+      const row = b.yLo + Math.ceil((eyeTy + 1) * 0.5 * h - 0.5);
+      fill(hi);
+      rect(ox + col * s, oy + row * s, s, s);
+    }
+    return;
+  }
+  const baseX = ox + b.xLo * s;
+  const baseY = oy + b.yLo * s;
+  // Render every fine cell of the template.
+  for (let ty = 0; ty < EYE_TPL_H; ty++) {
+    const row = EYE_TEMPLATE[ty];
+    if (!row) continue;
+    const y0 = Math.round(baseY + (ty * s) / hires);
+    const y1 = Math.round(baseY + ((ty + 1) * s) / hires);
+    for (let tx = 0; tx < EYE_TPL_W; tx++) {
+      const ch = row[tx];
+      if (ch === '.') continue;
+      const c = palette[EYE_CHAR_TO_IDX[ch]];
+      if (!c) continue;
+      const x0 = Math.round(baseX + (tx * s) / hires);
+      const x1 = Math.round(baseX + ((tx + 1) * s) / hires);
+      fill(c);
+      rect(x0, y0, x1 - x0, y1 - y0);
+    }
+  }
+  // Movable highlight inside the pupil rect.
+  const hi = palette[7];
+  if (hi) {
+    const pw = EYE_PUPIL_X1 - EYE_PUPIL_X0;   // 2 (3 cells wide → range 0..2)
+    const ph = EYE_PUPIL_Y1 - EYE_PUPIL_Y0;   // 7 (8 cells tall → range 0..7)
+    const tx = EYE_PUPIL_X0 + Math.ceil((eyeTx + 1) * 0.5 * pw - 0.5);
+    const ty = EYE_PUPIL_Y0 + Math.ceil((eyeTy + 1) * 0.5 * ph - 0.5);
+    const x0 = Math.round(baseX + (tx * s) / hires);
+    const x1 = Math.round(baseX + ((tx + 1) * s) / hires);
+    const y0 = Math.round(baseY + (ty * s) / hires);
+    const y1 = Math.round(baseY + ((ty + 1) * s) / hires);
+    fill(hi);
+    rect(x0, y0, x1 - x0, y1 - y0);
+  }
+}
+
 function drawSlime(cx, cy, frame, palette, eyeTx, eyeTy) {
   // Defensive: never let a bad input silently make Growly invisible.
   if (!isFinite(cx)) cx = width / 2;
@@ -758,42 +886,26 @@ function drawSlime(cx, cy, frame, palette, eyeTx, eyeTy) {
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
   const oy = Math.round(cy - (SPRITE_H * s) / 2);
 
-  // Pass 1: full sprite. All eye pixels (color 6) render normally — the
-  // highlight is painted on top in pass 2, so we don't need to mask anything.
+  // Pass 1: body sprite. Pupil cells ('6') render as body color so the
+  // detailed-eye overlay can show body through any transparent corners
+  // in the template, with no chunky-iris stripe peeking out.
   for (let y = 0; y < SPRITE_H; y++) {
     const row = frame[y];
     if (!row) continue;
     for (let x = 0; x < SPRITE_W; x++) {
       const idx = row.charCodeAt(x) - 48;
       if (idx === 0) continue;
-      const c = palette[idx];
+      const c = palette[idx === 6 ? 1 : idx];
       if (!c) continue;
       fill(c);
       rect(ox + x * s, oy + y * s, s, s);
     }
   }
 
-  // Pass 2: paint the highlight (color 7) inside each pupil cluster. eyeTx
-  // and eyeTy ∈ [-1, +1] map across the FULL pupil rect — ty=+1 reaches
-  // the bottom row, ty=-1 reaches the top, so Growly can actually look
-  // down.
-  //
-  // Math.ceil(... - 0.5) is "half-down" rounding (opposite of Math.round's
-  // half-up): for an even-celled pupil it lands the neutral highlight on
-  // the upper-LEFT cell of the two midmost candidates, matching the anime
-  // convention. Math.round would have biased neutral to lower-right and
-  // made Growly's gaze read as canted to one side.
+  // Pass 2: detailed anime eye over each pupil bbox at fine-pixel scale.
   const boxes = eyeBoxesFor(frame);
-  const hi = palette[7];
-  if (hi && boxes.length) {
-    fill(hi);
-    for (const b of boxes) {
-      const w = b.xHi - b.xLo;
-      const h = b.yHi - b.yLo;
-      const col = b.xLo + Math.ceil((eyeTx + 1) * 0.5 * w - 0.5);
-      const row = b.yLo + Math.ceil((eyeTy + 1) * 0.5 * h - 0.5);
-      rect(ox + col * s, oy + row * s, s, s);
-    }
+  for (const b of boxes) {
+    drawDetailedEye(b, eyeTx, eyeTy, palette, s, ox, oy);
   }
 }
 
@@ -1090,14 +1202,39 @@ function irisGazeVector(lm) {
   if (!lg && !rg) return null;
   const avgX = lg && rg ? (lg.x + rg.x) * 0.5 : (lg || rg).x;
   const avgY = lg && rg ? (lg.y + rg.y) * 0.5 : (lg || rg).y;
-  // Gain: a user's max gaze typically moves the iris ~30-40% of the
-  // socket half-width. Scale by ~2.5 so pegging at the edge of the eye
-  // pegs Growly's pupil.
-  const GAIN = 2.5;
+  // Deadzone-then-gain. Iris landmarks jitter by ~3-5% of socket
+  // half-width frame-to-frame even when the user holds still, so without
+  // a deadzone the eyes twitch. After the deadzone, multiply by gain so
+  // real eye movements (~30-40% of half-width at max look) peg Growly's
+  // pupil at ±1.
+  const dz = cfg.gazeDeadzone;
+  const gain = cfg.gazeGain;
+  function pipe(t) {
+    const a = Math.abs(t);
+    if (a <= dz) return 0;
+    const v = Math.sign(t) * (a - dz) * gain;
+    return v < -1 ? -1 : v > 1 ? 1 : v;
+  }
   return {
-    x: Math.max(-1, Math.min(1, -avgX * GAIN)),
-    y: Math.max(-1, Math.min(1,  avgY * GAIN)),
+    // Flip x: face-mesh +x is camera-right = display-left under the
+    // selfie mirror, but a user "looking left of screen" must point
+    // Growly's pupils to display-left (eyeTx negative).
+    x: pipe(-avgX),
+    y: pipe(avgY),
   };
+}
+
+// One-time diagnostic: log whether iris landmarks (468 / 473) actually
+// arrive in the FaceMesh output. If refineLandmarks didn't take, gaze
+// mode would silently degrade to "no target" → idle wander.
+let __irisLogged = false;
+function logIrisOnce(lm) {
+  if (__irisLogged || !lm) return;
+  const has468 = !!lm[468];
+  const has473 = !!lm[473];
+  console.log('Growly gaze: landmark count =', lm.length,
+              '| iris 468 =', has468, '| iris 473 =', has473);
+  __irisLogged = true;
 }
 
 // Where the red tracker dot is drawn in each mode, in normalized
