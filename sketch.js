@@ -51,9 +51,11 @@ function paletteForRgb(r, g, b) {
   };
 }
 
-// Round-dome blob with 2×2 kawaii eyes (color 7 highlight at the top-left of
-// each, color 6 pupil filling the rest). Bottom half is the darker shadow (3).
-// Generated from test_tracks/gen_sprite.py — re-run there to tweak proportions.
+// Round-dome blob with 3×2 pupil blocks (color 6). The highlight (color 7) is
+// NOT baked into the sprite — sketch.js paints it at runtime so the white can
+// slide between the three pupil columns to give Growly a left ↔ center ↔ right
+// gaze. Bottom half is the darker shadow (3). Generated from
+// test_tracks/gen_sprite.py.
 const F_NEUTRAL = [
   "000000000000000000000000",
   "000000000000000000000000",
@@ -66,8 +68,8 @@ const F_NEUTRAL = [
   "000002111111111111200000",
   "000021111111111111120000",
   "000021111111111111120000",
-  "000211117611111761112000",
-  "000211116611111661112000",
+  "000211116661111166612000",
+  "000211116661111166612000",
   "000211111111111111112000",
   "000233333333333333332000",
   "000023333333333333320000",
@@ -93,8 +95,8 @@ const F_MID_STRETCH = [
   "000002111111111111200000",
   "000002111111111111200000",
   "000021111111111111120000",
-  "000021117611117611120000",
-  "000021116611116611120000",
+  "000021116661111666120000",
+  "000021116661111666120000",
   "000021111111111111120000",
   "000023333333333333320000",
   "000002333333333333200000",
@@ -119,8 +121,8 @@ const F_STRETCH = [
   "000000211111111112000000",
   "000000211111111112000000",
   "000002111111111111200000",
-  "000002111761117611200000",
-  "000002111661116611200000",
+  "000002116661116661200000",
+  "000002116661116661200000",
   "000002111111111111200000",
   "000002333333333333200000",
   "000002333333333333200000",
@@ -148,8 +150,8 @@ const F_SQUASH = [
   "000000000000000000000000",
   "000000222222222222000000",
   "000002111111111111200000",
-  "000021117611111176120000",
-  "000211116611111166112000",
+  "000021166611111166620000",
+  "000211166611111166612000",
   "002111111111111111111200",
   "002333333333333333333200",
   "000233333333333333332000",
@@ -630,6 +632,46 @@ function updateSlime(now) {
   slime.isHopping = true;
 }
 
+// Find the two eye-pupil clusters in a frame and cache their bounding boxes
+// so we can paint a highlight pixel at a shifted column within each. Splits
+// by horizontal midpoint of all '6' pixels: left half → left eye, right →
+// right. The cache key is the frame array (frames never mutate).
+const EYE_BBOX_CACHE = new WeakMap();
+function eyeBoxesFor(frame) {
+  const cached = EYE_BBOX_CACHE.get(frame);
+  if (cached) return cached;
+  const pixels = [];
+  for (let y = 0; y < SPRITE_H; y++) {
+    const row = frame[y];
+    if (!row) continue;
+    for (let x = 0; x < SPRITE_W; x++) {
+      if (row.charCodeAt(x) - 48 === 6) pixels.push([x, y]);
+    }
+  }
+  if (pixels.length === 0) {
+    EYE_BBOX_CACHE.set(frame, []);
+    return [];
+  }
+  let xMin = pixels[0][0], xMax = pixels[0][0];
+  for (const [x] of pixels) { if (x < xMin) xMin = x; if (x > xMax) xMax = x; }
+  const midX = (xMin + xMax) / 2;
+  function bbox(group) {
+    if (group.length === 0) return null;
+    let xLo = group[0][0], xHi = group[0][0], yLo = group[0][1], yHi = group[0][1];
+    for (const [x, y] of group) {
+      if (x < xLo) xLo = x; if (x > xHi) xHi = x;
+      if (y < yLo) yLo = y; if (y > yHi) yHi = y;
+    }
+    return { xLo, xHi, yLo, yHi };
+  }
+  const boxes = [
+    bbox(pixels.filter(p => p[0] <= midX)),
+    bbox(pixels.filter(p => p[0] >  midX)),
+  ].filter(Boolean);
+  EYE_BBOX_CACHE.set(frame, boxes);
+  return boxes;
+}
+
 function drawSlime(cx, cy, frame, palette, eyeShift) {
   // Defensive: never let a bad input silently make Growly invisible.
   if (!isFinite(cx)) cx = width / 2;
@@ -642,36 +684,33 @@ function drawSlime(cx, cy, frame, palette, eyeShift) {
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
   const oy = Math.round(cy - (SPRITE_H * s) / 2);
 
-  // First pass: body + rim + shadow. Eye pixels (6,7) are painted with body
-  // color so the underlying sprite is solid where the eyes used to be —
-  // when we then redraw the eyes at an offset position, the original spot
-  // is correctly filled in by the body.
+  // Pass 1: full sprite. All eye pixels (color 6) render normally — the
+  // highlight is painted on top in pass 2, so we don't need to mask anything.
   for (let y = 0; y < SPRITE_H; y++) {
     const row = frame[y];
     if (!row) continue;
     for (let x = 0; x < SPRITE_W; x++) {
       const idx = row.charCodeAt(x) - 48;
       if (idx === 0) continue;
-      const c = (idx === 6 || idx === 7) ? palette[1] : palette[idx];
+      const c = palette[idx];
       if (!c) continue;
       fill(c);
       rect(ox + x * s, oy + y * s, s, s);
     }
   }
 
-  // Second pass: eyes (pupil + highlight), horizontally shifted by eyeShift.
-  if (eyeShift !== 0 || true) {
-    for (let y = 0; y < SPRITE_H; y++) {
-      const row = frame[y];
-      if (!row) continue;
-      for (let x = 0; x < SPRITE_W; x++) {
-        const idx = row.charCodeAt(x) - 48;
-        if (idx !== 6 && idx !== 7) continue;
-        const c = palette[idx];
-        if (!c) continue;
-        fill(c);
-        rect(ox + (x + eyeShift) * s, oy + y * s, s, s);
-      }
+  // Pass 2: paint the highlight (color 7) on the top row of each pupil
+  // cluster, at xLo + 1 + eyeShift — so eyeShift = -1 puts the white on
+  // the left column of the pupil (looking left), 0 = center, +1 = right.
+  const boxes = eyeBoxesFor(frame);
+  const hi = palette[7];
+  if (hi && boxes.length) {
+    fill(hi);
+    for (const b of boxes) {
+      const w = b.xHi - b.xLo;        // pupil width in cells minus 1
+      const centerCol = b.xLo + Math.floor(w / 2);
+      const col = Math.max(b.xLo, Math.min(b.xHi, centerCol + eyeShift));
+      rect(ox + col * s, oy + b.yLo * s, s, s);
     }
   }
 }
