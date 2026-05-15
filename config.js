@@ -29,15 +29,17 @@ window.GROWLY_CONFIG = {
   // bass band routinely averages 2-3× more per-bin energy than the high band,
   // so boosting high lets bright vocals/cymbals actually drive the color toward
   // pink instead of always being dwarfed by bass.
+  // Bass naturally dominates the spectrum, so left at unity. Mid and high are
+  // boosted to give vocals/guitars/cymbals a fighting chance against the kick.
   bandBassGain: 1.0,
-  bandMidGain:  1.0,
-  bandHighGain: 2.5,
+  bandMidGain:  1.8,
+  bandHighGain: 4.0,
   bandHighRedShare:  0.9,         // how much high band leaks into R (1 = full pink, 0 = pure blue)
   bandHighBlueShare: 0.9,         // how much high band leaks into B
   ambientRgb: [0.15, 0.35, 1.0],  // shown when smoothedLevel < intensityThreshold (light blue)
   pitchSmoothing: 0.06,           // EMA on the RGB color — lower = slower dwell
   hueFallback: 220,               // hue used only when the smoothed RGB is gray (saturation ≈ 0)
-  intensityThreshold: 0.30,       // gates pitch/color: below this, color falls back to ambient blue
+  intensityThreshold: 0.15,       // gates pitch/color: below this, color falls back to ambient blue (lowered from 0.30 — typical music levels often dipped below 30%, so color was stuck on ambient blue)
   silenceResetIntensity: 0.08,    // gates BPM silence-reset: only count the room as silent for BPM purposes when smoothedLevel is REALLY low (quiet song sections should NOT trigger reset)
 
   // ----- BPM detection -----
@@ -90,7 +92,7 @@ window.GROWLY_CONFIG = {
   // bounce so Growly stays roughly centered. swayMaxAmpPx is the half-width
   // of the L–R landing spread.
   swayBpmThreshold: 105,          // sway begins above this BPM
-  swayMaxAmpPx: 6,                // peak side-to-side travel in sprite-pixels (half-spread)
+  swayMaxAmpPx: 14,               // peak side-to-side travel in sprite-pixels (half-spread between landing spots)
 
   // ----- Debug overlay -----
   showHud: true,
