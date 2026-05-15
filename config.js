@@ -105,9 +105,8 @@ window.GROWLY_CONFIG = {
   swayMaxAmpPx: 24,               // peak side-to-side travel in sprite-pixels (half-spread between landing spots)
 
   // ----- Idle eye animation -----
-  // Used when face tracking is OFF or no face is in view.
-  eyeShiftMaxPx:  1,              // max horizontal highlight offset inside the pupil (3-wide pupil → ±1)
-  eyeShiftMaxYPx: 1,              // max vertical highlight offset inside the pupil (4-tall pupil → ±1)
+  // Used when face tracking is OFF or no face is in view. Drives a sin(t)
+  // in [-1,+1] that drawSlime maps across the full pupil width.
   eyeShiftPeriodMs: 2800,         // one full L → R → L cycle every this many ms
 
   // ----- Face tracking -----

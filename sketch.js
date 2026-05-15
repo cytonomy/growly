@@ -63,20 +63,20 @@ const F_NEUTRAL = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
-  "000000002222222200000000",
-  "000000221111111122000000",
+  "000000022222222220000000",
+  "000000211111111112000000",
   "000002111111111111200000",
   "000021111111111111120000",
-  "000021116661111166620000",
-  "000211116661111166612000",
-  "000211116661111166612000",
-  "000211116661111166612000",
+  "000211166661111166662000",
+  "000211166661111166662000",
+  "000211166661111166662000",
+  "000211166661111166662000",
+  "000211111111111111112000",
   "000211111111111111112000",
   "000021111111111111120000",
-  "000021111111111111120000",
   "000002333333333333200000",
-  "000000223333333322000000",
-  "000000002222222200000000",
+  "000000233333333332000000",
+  "000000022222222220000000",
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000000000000000000",
@@ -89,21 +89,21 @@ const F_MID_STRETCH = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000000222222000000000",
-  "000000002111111200000000",
-  "000000021111111120000000",
+  "000000022111111220000000",
   "000000211111111112000000",
   "000002111111111111200000",
   "000002111111111111200000",
-  "000021116661111666120000",
-  "000021116661111666120000",
-  "000021116661111666120000",
-  "000021116661111666120000",
+  "000021111111111111120000",
+  "000021116666111166620000",
+  "000021116666111166620000",
+  "000211116666111166662000",
+  "000021116666111166620000",
+  "000021111111111111120000",
   "000021111111111111120000",
   "000002111111111111200000",
-  "000002111111111111200000",
+  "000002333333333333200000",
   "000000233333333332000000",
-  "000000023333333320000000",
-  "000000002333333200000000",
+  "000000022333333220000000",
   "000000000222222000000000",
   "000000000000000000000000",
   "000000000000000000000000",
@@ -118,16 +118,16 @@ const F_STRETCH = [
   "000000002111111200000000",
   "000000021111111120000000",
   "000000211111111112000000",
-  "000000211111111112000000",
-  "000000211111111112000000",
-  "000002116661116661200000",
-  "000002116661116661200000",
-  "000002116661116661200000",
-  "000002116661116661200000",
   "000002111111111111200000",
   "000002111111111111200000",
-  "000000211111111112000000",
-  "000000211111111112000000",
+  "000002116666111666200000",
+  "000002116666111666200000",
+  "000002116666111666200000",
+  "000002116666111666200000",
+  "000002111111111111200000",
+  "000002111111111111200000",
+  "000002111111111111200000",
+  "000002111111111111200000",
   "000000233333333332000000",
   "000000023333333320000000",
   "000000002333333200000000",
@@ -149,14 +149,14 @@ const F_SQUASH = [
   "000000000000000000000000",
   "000000000000000000000000",
   "000000222222222222000000",
-  "000002166611111166200000",
-  "000021166611111166620000",
-  "000211166611111166612000",
-  "002111166611111166611200",
+  "000022666611111166220000",
+  "000211666611111166662000",
+  "002111666611111166661200",
+  "002111666611111166661200",
   "002111111111111111111200",
-  "000211111111111111112000",
-  "000023333333333333320000",
-  "000002333333333333200000",
+  "002111111111111111111200",
+  "000233333333333333332000",
+  "000022333333333333220000",
   "000000222222222222000000",
   "000000000000000000000000",
   "000000000000000000000000",
@@ -326,41 +326,39 @@ function draw() {
   if (!isFinite(renderY) || renderY < -SPRITE_H * cfg.renderScale || renderY > height + SPRITE_H * cfg.renderScale) renderY = height / 2;
 
   // Eye direction: when face tracking is on AND a face is visible, the
-  // highlight on each eye points in the direction of (face_on_canvas - Growly).
-  // When no face is detected, fall back to the idle L↔R sine wander on X only.
-  let eyeShiftX = 0, eyeShiftY = 0;
+  // highlight on each eye points at the midpoint between the user's eyes
+  // (landmarks 133 + 362) — same point we draw the red tracker dot at, so
+  // the gaze visibly locks to the dot. When no face is detected, fall back
+  // to an idle L↔R sine wander on X only.
+  let eyeTx = 0, eyeTy = 0;
+  let faceMid = null;
   if (faceTrackingActive && lastFaceLandmarks) {
-    let sx = 0, sy = 0;
-    for (let i = 0; i < lastFaceLandmarks.length; i++) {
-      sx += lastFaceLandmarks[i].x;
-      sy += lastFaceLandmarks[i].y;
-    }
-    const faceXn = sx / lastFaceLandmarks.length;
-    const faceYn = sy / lastFaceLandmarks.length;
-    // Wireframe is rendered at ((1-x)*width, y*height) so the face's canvas
-    // position uses the same mapping — that way the direction vector is
-    // consistent with what the user sees.
-    const faceCanvasX = (1 - faceXn) * width;
-    const faceCanvasY = faceYn * height;
+    faceMid = faceEyeMidpoint(lastFaceLandmarks);
+  }
+  if (faceMid) {
+    // Tracker dot is rendered at ((1-x)*width, y*height) so the face's
+    // canvas position uses the same mapping — that way the direction
+    // vector is consistent with what the user sees.
+    const faceCanvasX = (1 - faceMid.x) * width;
+    const faceCanvasY = faceMid.y * height;
     const targetVecX = faceCanvasX - renderX;
     const targetVecY = faceCanvasY - renderY;
     smoothedFaceVecX += (targetVecX - smoothedFaceVecX) * cfg.faceFollowSmoothing;
     smoothedFaceVecY += (targetVecY - smoothedFaceVecY) * cfg.faceFollowSmoothing;
-    // Deadzone in pixels — the eyes hit full deflection once the face is
-    // at least this many canvas-pixels away in that axis.
+    // Deadzone in pixels — eyes hit full deflection once the face is at
+    // least this many canvas-pixels away in that axis. Normalized tx/ty
+    // are passed straight to drawSlime so they sweep the FULL pupil.
     const dead = cfg.faceFollowDeadzone * Math.min(width, height);
-    const tx = Math.max(-1, Math.min(1, smoothedFaceVecX / dead));
-    const ty = Math.max(-1, Math.min(1, smoothedFaceVecY / dead));
-    eyeShiftX = Math.round(tx * cfg.eyeShiftMaxPx);
-    eyeShiftY = Math.round(ty * cfg.eyeShiftMaxYPx);
+    eyeTx = Math.max(-1, Math.min(1, smoothedFaceVecX / dead));
+    eyeTy = Math.max(-1, Math.min(1, smoothedFaceVecY / dead));
   } else {
     const eyePhase = (now / cfg.eyeShiftPeriodMs) * Math.PI * 2;
-    eyeShiftX = Math.round(Math.sin(eyePhase) * cfg.eyeShiftMaxPx);
-    eyeShiftY = 0;
+    eyeTx = Math.sin(eyePhase);
+    eyeTy = 0;
   }
-  drawSlime(renderX, renderY, frame, palette, eyeShiftX, eyeShiftY);
+  drawSlime(renderX, renderY, frame, palette, eyeTx, eyeTy);
 
-  if (faceTrackingActive) drawFaceWireframe();
+  if (faceTrackingActive) drawFaceTrackerDot();
 
   if (cfg.showHud) drawHud();
 }
@@ -737,14 +735,16 @@ function eyeBoxesFor(frame) {
   return boxes;
 }
 
-function drawSlime(cx, cy, frame, palette, eyeShiftX, eyeShiftY) {
+function drawSlime(cx, cy, frame, palette, eyeTx, eyeTy) {
   // Defensive: never let a bad input silently make Growly invisible.
   if (!isFinite(cx)) cx = width / 2;
   if (!isFinite(cy)) cy = height / 2;
   if (!frame || !Array.isArray(frame) || frame.length !== SPRITE_H) frame = F_NEUTRAL;
   if (!palette || !palette[1]) palette = paletteForRgb(cfg.ambientRgb[0], cfg.ambientRgb[1], cfg.ambientRgb[2]);
-  if (!Number.isInteger(eyeShiftX)) eyeShiftX = 0;
-  if (!Number.isInteger(eyeShiftY)) eyeShiftY = 0;
+  if (!Number.isFinite(eyeTx)) eyeTx = 0;
+  if (!Number.isFinite(eyeTy)) eyeTy = 0;
+  if (eyeTx < -1) eyeTx = -1; else if (eyeTx > 1) eyeTx = 1;
+  if (eyeTy < -1) eyeTy = -1; else if (eyeTy > 1) eyeTy = 1;
 
   const s = cfg.renderScale;
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
@@ -765,10 +765,10 @@ function drawSlime(cx, cy, frame, palette, eyeShiftX, eyeShiftY) {
     }
   }
 
-  // Pass 2: paint the highlight (color 7) inside each pupil cluster at
-  // (centerCol + eyeShiftX, centerRow + eyeShiftY). centerRow is biased one
-  // cell below the top of the pupil (anime convention: highlight sits in
-  // the upper-half of the iris when looking straight ahead).
+  // Pass 2: paint the highlight (color 7) inside each pupil cluster. eyeTx
+  // and eyeTy ∈ [-1, +1] map across the FULL pupil rect — ty=+1 reaches
+  // the bottom row, ty=-1 reaches the top, so Growly can actually look
+  // down. No pre-bias toward the top of the iris.
   const boxes = eyeBoxesFor(frame);
   const hi = palette[7];
   if (hi && boxes.length) {
@@ -776,10 +776,8 @@ function drawSlime(cx, cy, frame, palette, eyeShiftX, eyeShiftY) {
     for (const b of boxes) {
       const w = b.xHi - b.xLo;
       const h = b.yHi - b.yLo;
-      const centerCol = b.xLo + Math.floor(w / 2);
-      const centerRow = b.yLo + Math.max(0, Math.floor(h / 2) - 1);
-      const col = Math.max(b.xLo, Math.min(b.xHi, centerCol + eyeShiftX));
-      const row = Math.max(b.yLo, Math.min(b.yHi, centerRow + eyeShiftY));
+      const col = b.xLo + Math.round((eyeTx + 1) * 0.5 * w);
+      const row = b.yLo + Math.round((eyeTy + 1) * 0.5 * h);
       rect(ox + col * s, oy + row * s, s, s);
     }
   }
@@ -1023,36 +1021,28 @@ function updateFaceButton() {
   }
 }
 
-function drawFaceWireframe() {
+// Midpoint between MediaPipe landmark 133 (left eye inner corner) and 362
+// (right eye inner corner) in normalized face-mesh coords. Same point is
+// used as the eye-follow target and the position of the red tracker dot,
+// so Growly's gaze visibly locks to the dot. Returns null if either
+// landmark is missing from this frame.
+function faceEyeMidpoint(lm) {
+  if (!lm) return null;
+  const a = lm[133];
+  const b = lm[362];
+  if (!a || !b) return null;
+  return { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
+}
+
+function drawFaceTrackerDot() {
   if (!lastFaceLandmarks) return;
-  const lm = lastFaceLandmarks;
-  const tess = window.FACEMESH_TESSELATION;
+  const mid = faceEyeMidpoint(lastFaceLandmarks);
+  if (!mid) return;
   push();
-  noFill();
-  stroke(120, 255, 180, 200);
-  strokeWeight(1);
-  // Mirror x: webcam shows the user as a selfie, so we flip to match the
-  // mental "mirror image" expectation. All ~2700 tesselation edges are batched
-  // into a single LINES shape — drawing them with individual line() calls
-  // tanked frame rate on weaker GPUs.
-  if (tess && tess.length) {
-    beginShape(LINES);
-    for (let i = 0; i < tess.length; i++) {
-      const pair = tess[i];
-      const a = lm[pair[0]];
-      const b = lm[pair[1]];
-      if (!a || !b) continue;
-      vertex((1 - a.x) * width, a.y * height);
-      vertex((1 - b.x) * width, b.y * height);
-    }
-    endShape();
-  } else {
-    noStroke();
-    fill(120, 255, 180, 220);
-    for (let i = 0; i < lm.length; i++) {
-      circle((1 - lm[i].x) * width, lm[i].y * height, 2);
-    }
-  }
+  noStroke();
+  fill(255, 60, 60, 230);
+  // Mirror x to match the selfie-flipped mapping used everywhere else.
+  circle((1 - mid.x) * width, mid.y * height, 6);
   pop();
 }
 
