@@ -260,9 +260,12 @@ function draw() {
       const swayBlend = Math.min(1,
         (bpm - cfg.swayBpmThreshold) / Math.max(1, cfg.bpmOctaveMax - cfg.swayBpmThreshold));
       const swayAmp = swayBlend * cfg.swayMaxAmpPx * intensity;
-      // Linear lerp from -swayLandSide (takeoff foot) to +swayLandSide (landing foot)
-      // gives constant horizontal velocity through the air — physically a parabolic arc.
-      const swayX = lerp(-swayLandSide, swayLandSide, bouncePhase) * swayAmp;
+      // Lift occupies the first half of bouncePhase (sin(2π·phase) > 0); the
+      // second half Growly is on the ground. Drive the lateral arc only during
+      // the airborne fraction so he LANDS at the new side and then sits still
+      // until the next takeoff.
+      const airborne = Math.min(1, bouncePhase * 2);
+      const swayX = lerp(-swayLandSide, swayLandSide, airborne) * swayAmp;
       renderX = slime.x + swayX * cfg.renderScale;
     }
   }
