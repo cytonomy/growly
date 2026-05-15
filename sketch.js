@@ -10,6 +10,31 @@ const cfg = window.GROWLY_CONFIG;
 const SPRITE_W = 24;
 const SPRITE_H = 24;
 
+// Piecewise log-frequency → hue mapping with shortest-path interpolation
+// around the color wheel. Stops live in cfg.pitchHueStops as [hz, hue°] pairs.
+// Shortest-path means the trip from green (~100°) up to pink (~320°) wraps
+// BACKWARDS through warm colors (yellow→orange→red→magenta) instead of
+// forward through cyan/blue — keeping blue reserved for the silent ambient.
+function pitchHueFor(hz) {
+  const stops = cfg.pitchHueStops;
+  if (hz <= stops[0][0]) return stops[0][1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [hz0, h0] = stops[i];
+    const [hz1, h1] = stops[i + 1];
+    if (hz <= hz1) {
+      const f = (Math.log(hz) - Math.log(hz0)) / (Math.log(hz1) - Math.log(hz0));
+      return lerpHueShortest(h0, h1, f);
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+function lerpHueShortest(h0, h1, t) {
+  // Shortest signed path from h0 to h1 around 360°; range [-180, 180].
+  const d = ((h1 - h0 + 540) % 360) - 180;
+  return ((h0 + d * t) + 360) % 360;
+}
+
 // 0 transparent, 1 base, 2 rim, 3 shadow, 6 eye dot. Hue is set per-frame;
 // saturation and lightness come from cfg per palette role.
 function paletteForHue(h) {
@@ -329,13 +354,11 @@ function analyzeSpectrum(now) {
   if (totalMag > 0 && smoothedLevel >= cfg.intensityThreshold) {
     const meanBin = weightedSum / totalMag;
     const pitchHz = meanBin * binHz;
-    const logMin = Math.log(cfg.pitchMinHz);
-    const logMax = Math.log(cfg.pitchMaxHz);
-    const clamped = Math.max(cfg.pitchMinHz, Math.min(cfg.pitchMaxHz, pitchHz));
-    const t = (Math.log(clamped) - logMin) / (logMax - logMin);
-    targetHue = t * cfg.pitchHueRange;
+    targetHue = pitchHueFor(pitchHz);
   }
-  smoothedPitchHue += (targetHue - smoothedPitchHue) * cfg.pitchSmoothing;
+  // Circular EMA — interpolate along the shorter arc so the color doesn't take
+  // the long way around the wheel during a hue jump (e.g. red→pink).
+  smoothedPitchHue = lerpHueShortest(smoothedPitchHue, targetHue, cfg.pitchSmoothing);
 
   // ---------- ODF (spectral flux) ----------
   if (!prevSpectrum || prevSpectrum.length !== binCount) {

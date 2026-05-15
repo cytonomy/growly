@@ -16,12 +16,26 @@ window.GROWLY_CONFIG = {
   levelDisplaySmoothing: 0.04,    // EMA factor on the HUD level% readout (slow — keeps it from flickering)
   fftSize: 2048,
 
-  // ----- Pitch → hue (dominant frequency drives rainbow position) -----
+  // ----- Pitch → hue (spectral centroid drives color) -----
+  // Centroid frequency (Hz) is the energy-weighted mean over [pitchMinHz, pitchMaxHz].
+  // pitchHueStops maps centroid Hz → hue° as a piecewise log-frequency lerp,
+  // interpolated along the SHORTER arc of the color wheel between successive
+  // anchors. The path bass → mid → high goes red → yellow → green → (skipping
+  // blue, wrapping backwards through warm colors) → pink/purple. Blue is
+  // reserved for the ambient/silent state (hueFallback).
   pitchMinHz: 80,
   pitchMaxHz: 5000,
-  pitchHueRange: 300,
-  pitchSmoothing: 0.08,
-  hueFallback: 220,
+  pitchHueStops: [
+    // [centroid_hz, hue_deg]
+    [80,    0],     // sub-bass / kick           → deep red
+    [250,  20],     // bass                      → warm red-orange
+    [600,  60],     // low-mid / vocals          → yellow
+    [1500, 110],    // mid / guitars             → green
+    [3000, 290],    // high-mid / cymbals        → purple (wraps the short way back through warm colors, skipping blue)
+    [5000, 325],    // air / sparkle             → pink/magenta
+  ],
+  pitchSmoothing: 0.04,           // lower = slower, more dramatic dwell on each color (was 0.08)
+  hueFallback: 220,               // ambient blue when smoothedLevel < intensityThreshold
   intensityThreshold: 0.02,
 
   // ----- BPM detection -----
