@@ -57,7 +57,7 @@ window.GROWLY_CONFIG = {
 
   // ----- Bounce vertical amplitude (intensity-driven) -----
   bounceMinAmpPx: 0.5,            // tiny when silent — barely a jiggle
-  bounceMaxAmpPx: 14,
+  bounceMaxAmpPx: 32,             // dramatic launch on loud music
 
   // ----- Bounce deformation (intensity-driven) -----
   // Selects which sprite frames cycle through during a bounce, so the
