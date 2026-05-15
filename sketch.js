@@ -923,15 +923,18 @@ window.addEventListener('DOMContentLoaded', () => {
   btn.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (!faceTrackingActive) {
+      // Flip flag BEFORE awaiting init so the pump loop inside
+      // ensureFaceTracker sees it as true and keeps running.
+      faceTrackingActive = true;
       btn.textContent = 'Face tracking: starting…';
       btn.disabled = true;
       const ok = await ensureFaceTracker();
       btn.disabled = false;
       if (!ok) {
+        faceTrackingActive = false;
         btn.textContent = 'Face tracking: failed';
         return;
       }
-      faceTrackingActive = true;
       btn.classList.add('on');
       btn.textContent = 'Face tracking: ON';
     } else {

@@ -11,7 +11,7 @@ window.GROWLY_CONFIG = {
   arrivePx: 2,
 
   // ----- Mic input -----
-  micGain: 55,                    // typical room-listening volume lands around 60-80%; the loudest peaks hit 100%
+  micGain: 32,                    // typical room-listening volume lands around 40-60%; only the loudest peaks reach 100%
   micSmoothing: 0.022,            // EMA factor on intensity — lower = slower buildup; 0.022 ≈ 1.5s to ramp up to a loud peak
   levelDisplaySmoothing: 0.04,    // EMA factor on the HUD level% readout (slow — keeps it from flickering)
   fftSize: 2048,
