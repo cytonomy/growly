@@ -96,11 +96,14 @@ window.GROWLY_CONFIG = {
   swayMaxAmpPx: 24,               // peak side-to-side travel in sprite-pixels (half-spread between landing spots)
 
   // ----- Idle eye animation -----
-  eyeShiftMaxPx: 1,               // max horizontal pupil offset in sprite-pixels (eyes are 2 wide; ±1 looks natural)
+  // Used when face tracking is OFF or no face is in view.
+  eyeShiftMaxPx: 1,               // max horizontal pupil offset in sprite-pixels (3-wide pupil = ±1)
   eyeShiftPeriodMs: 2800,         // one full L → R → L cycle every this many ms
 
   // ----- Face tracking -----
   faceInferenceMinGapMs: 80,      // minimum time between face-mesh inferences (~12 Hz cap so the model doesn't starve Growly's draw loop)
+  faceFollowSmoothing: 0.12,      // EMA on the tracked face position (lower = smoother / less jittery eye following)
+  faceFollowDeadzone: 0.25,       // face must be this far from center (in normalized x) before eyes hit their full deflection
 
   // ----- Debug overlay -----
   showHud: true,

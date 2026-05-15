@@ -70,7 +70,7 @@ const F_NEUTRAL = [
   "000021116661111166620000",
   "000211116661111166612000",
   "000211116661111166612000",
-  "000211111111111111112000",
+  "000211116661111166612000",
   "000211111111111111112000",
   "000021111111111111120000",
   "000021111111111111120000",
@@ -97,7 +97,7 @@ const F_MID_STRETCH = [
   "000021116661111666120000",
   "000021116661111666120000",
   "000021116661111666120000",
-  "000021111111111111120000",
+  "000021116661111666120000",
   "000021111111111111120000",
   "000002111111111111200000",
   "000002111111111111200000",
@@ -123,7 +123,7 @@ const F_STRETCH = [
   "000002116661116661200000",
   "000002116661116661200000",
   "000002116661116661200000",
-  "000002111111111111200000",
+  "000002116661116661200000",
   "000002111111111111200000",
   "000002111111111111200000",
   "000000211111111112000000",
@@ -152,7 +152,7 @@ const F_SQUASH = [
   "000002166611111166200000",
   "000021166611111166620000",
   "000211166611111166612000",
-  "002111111111111111111200",
+  "002111166611111166611200",
   "002111111111111111111200",
   "000211111111111111112000",
   "000023333333333333320000",
@@ -190,6 +190,7 @@ let swayLandSide = 1;         // alternates ±1 each landing — Growly arcs L�
 let smoothedR = 0;            // smoothed RGB color from 3-band energy mix
 let smoothedG = 0;
 let smoothedB = 0;
+let smoothedFaceX = 0.5;      // smoothed mirrored x of the biggest detected face ([0,1], 0.5 = centered)
 let detectedBpm = 0;          // smoothed tempo from autocorrelation
 let tempoEstimates = [];      // rolling buffer of recent raw BPM estimates
 let outlierCandidates = [];   // recent confident estimates that are far from the median
@@ -316,11 +317,24 @@ function draw() {
   if (!isFinite(renderX) || renderX < -SPRITE_W * cfg.renderScale || renderX > width + SPRITE_W * cfg.renderScale) renderX = width / 2;
   if (!isFinite(renderY) || renderY < -SPRITE_H * cfg.renderScale || renderY > height + SPRITE_H * cfg.renderScale) renderY = height / 2;
 
-  // Idle eye-shift: sinusoidal L↔R glance every cfg.eyeShiftPeriodMs.
-  // Quantized to integer sprite-pixels so the eyes pop discretely between
-  // -1 / 0 / +1 instead of sliding sub-pixel.
-  const eyePhase = (now / cfg.eyeShiftPeriodMs) * Math.PI * 2;
-  const eyeShift = Math.round(Math.sin(eyePhase) * cfg.eyeShiftMaxPx);
+  // Eye shift: if face tracking is active and we see a face, the eyes follow
+  // the (smoothed) mirrored x of the biggest detected face. Otherwise fall
+  // back to a slow idle L↔R glance.
+  let eyeShiftRaw = 0;
+  if (faceTrackingActive && lastFaceLandmarks) {
+    let sx = 0;
+    for (let i = 0; i < lastFaceLandmarks.length; i++) sx += lastFaceLandmarks[i].x;
+    const faceCx = sx / lastFaceLandmarks.length;
+    const mirrored = 1 - faceCx;                  // selfie POV
+    smoothedFaceX += (mirrored - smoothedFaceX) * cfg.faceFollowSmoothing;
+    const offset = smoothedFaceX - 0.5;           // [-0.5, +0.5]
+    const t = Math.max(-1, Math.min(1, offset / cfg.faceFollowDeadzone));
+    eyeShiftRaw = t * cfg.eyeShiftMaxPx;
+  } else {
+    const eyePhase = (now / cfg.eyeShiftPeriodMs) * Math.PI * 2;
+    eyeShiftRaw = Math.sin(eyePhase) * cfg.eyeShiftMaxPx;
+  }
+  const eyeShift = Math.round(eyeShiftRaw);
   drawSlime(renderX, renderY, frame, palette, eyeShift);
 
   if (faceTrackingActive) drawFaceWireframe();
@@ -872,14 +886,28 @@ async function ensureFaceTracker() {
         locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
       });
       mesh.setOptions({
-        maxNumFaces: 1,
+        maxNumFaces: 2,
         refineLandmarks: false,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
       });
       mesh.onResults((results) => {
-        lastFaceLandmarks =
-          (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) || null;
+        const faces = results.multiFaceLandmarks;
+        if (!faces || faces.length === 0) { lastFaceLandmarks = null; return; }
+        // Pick the largest face by bounding-box area (= visually closest).
+        let best = faces[0], bestArea = 0;
+        for (const lm of faces) {
+          let xLo = 1, xHi = 0, yLo = 1, yHi = 0;
+          for (const p of lm) {
+            if (p.x < xLo) xLo = p.x;
+            if (p.x > xHi) xHi = p.x;
+            if (p.y < yLo) yLo = p.y;
+            if (p.y > yHi) yHi = p.y;
+          }
+          const a = (xHi - xLo) * (yHi - yLo);
+          if (a > bestArea) { bestArea = a; best = lm; }
+        }
+        lastFaceLandmarks = best;
       });
       console.log('Growly face: loading WASM + model…');
       await mesh.initialize();
