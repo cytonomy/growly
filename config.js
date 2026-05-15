@@ -11,7 +11,7 @@ window.GROWLY_CONFIG = {
   arrivePx: 2,
 
   // ----- Mic input -----
-  micGain: 60,                    // calibrated so typical room-listening volume reaches ~70-80% intensity (raw mic RMS × this)
+  micGain: 95,                    // sensitivity bump — typical room-listening volume now pegs near 100% so bounce amplitude reaches the configured max on loud music
   micSmoothing: 0.08,             // EMA factor on intensity used by bounce/sway (fast)
   levelDisplaySmoothing: 0.04,    // EMA factor on the HUD level% readout (slow — keeps it from flickering)
   fftSize: 2048,
@@ -94,6 +94,10 @@ window.GROWLY_CONFIG = {
   // of the L–R landing spread.
   swayBpmThreshold: 105,          // sway begins above this BPM
   swayMaxAmpPx: 24,               // peak side-to-side travel in sprite-pixels (half-spread between landing spots)
+
+  // ----- Idle eye animation -----
+  eyeShiftMaxPx: 1,               // max horizontal pupil offset in sprite-pixels (eyes are 2 wide; ±1 looks natural)
+  eyeShiftPeriodMs: 2800,         // one full L → R → L cycle every this many ms
 
   // ----- Debug overlay -----
   showHud: true,

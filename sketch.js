@@ -314,7 +314,12 @@ function draw() {
   if (!isFinite(renderX) || renderX < -SPRITE_W * cfg.renderScale || renderX > width + SPRITE_W * cfg.renderScale) renderX = width / 2;
   if (!isFinite(renderY) || renderY < -SPRITE_H * cfg.renderScale || renderY > height + SPRITE_H * cfg.renderScale) renderY = height / 2;
 
-  drawSlime(renderX, renderY, frame, palette);
+  // Idle eye-shift: sinusoidal L↔R glance every cfg.eyeShiftPeriodMs.
+  // Quantized to integer sprite-pixels so the eyes pop discretely between
+  // -1 / 0 / +1 instead of sliding sub-pixel.
+  const eyePhase = (now / cfg.eyeShiftPeriodMs) * Math.PI * 2;
+  const eyeShift = Math.round(Math.sin(eyePhase) * cfg.eyeShiftMaxPx);
+  drawSlime(renderX, renderY, frame, palette, eyeShift);
 
   if (cfg.showHud) drawHud();
 }
@@ -625,27 +630,48 @@ function updateSlime(now) {
   slime.isHopping = true;
 }
 
-function drawSlime(cx, cy, frame, palette) {
+function drawSlime(cx, cy, frame, palette, eyeShift) {
   // Defensive: never let a bad input silently make Growly invisible.
   if (!isFinite(cx)) cx = width / 2;
   if (!isFinite(cy)) cy = height / 2;
   if (!frame || !Array.isArray(frame) || frame.length !== SPRITE_H) frame = F_NEUTRAL;
   if (!palette || !palette[1]) palette = paletteForRgb(cfg.ambientRgb[0], cfg.ambientRgb[1], cfg.ambientRgb[2]);
+  if (!Number.isInteger(eyeShift)) eyeShift = 0;
 
   const s = cfg.renderScale;
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
   const oy = Math.round(cy - (SPRITE_H * s) / 2);
 
+  // First pass: body + rim + shadow. Eye pixels (6,7) are painted with body
+  // color so the underlying sprite is solid where the eyes used to be —
+  // when we then redraw the eyes at an offset position, the original spot
+  // is correctly filled in by the body.
   for (let y = 0; y < SPRITE_H; y++) {
     const row = frame[y];
     if (!row) continue;
     for (let x = 0; x < SPRITE_W; x++) {
       const idx = row.charCodeAt(x) - 48;
       if (idx === 0) continue;
-      const c = palette[idx];
+      const c = (idx === 6 || idx === 7) ? palette[1] : palette[idx];
       if (!c) continue;
       fill(c);
       rect(ox + x * s, oy + y * s, s, s);
+    }
+  }
+
+  // Second pass: eyes (pupil + highlight), horizontally shifted by eyeShift.
+  if (eyeShift !== 0 || true) {
+    for (let y = 0; y < SPRITE_H; y++) {
+      const row = frame[y];
+      if (!row) continue;
+      for (let x = 0; x < SPRITE_W; x++) {
+        const idx = row.charCodeAt(x) - 48;
+        if (idx !== 6 && idx !== 7) continue;
+        const c = palette[idx];
+        if (!c) continue;
+        fill(c);
+        rect(ox + (x + eyeShift) * s, oy + y * s, s, s);
+      }
     }
   }
 }
