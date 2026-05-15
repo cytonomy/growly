@@ -34,7 +34,7 @@ window.GROWLY_CONFIG = {
   bpmHistorySize: 24,
   bpmPriorCenter: 110,
   bpmPriorStd: 70,
-  bpmConfidenceThreshold: 3.0,    // first-pass: only commit clearly dominant peaks
+  bpmConfidenceThreshold: 2.9,    // first-pass: only commit clearly dominant peaks (low enough for room-mic capture of slow ballads)
   bpmFallback: 35,                // "no music" slow idle tempo
   bpmMin: 50,
   bpmMax: 180,
@@ -46,7 +46,7 @@ window.GROWLY_CONFIG = {
   // existing lock — protects against a single bridge / bar where the
   // algorithm latches onto a syncopated harmonic.
   bpmOutlierTolerance: 0.15,
-  bpmOutlierConfirmations: 5,
+  bpmOutlierConfirmations: 7,
   // Silence-based reset. If the smoothed mic level stays below
   // intensityThreshold for this long, we drop the lock and revert to
   // bpmFallback. This is the only thing that resets the tempo — silence
