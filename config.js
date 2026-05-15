@@ -11,47 +11,66 @@ window.GROWLY_CONFIG = {
   arrivePx: 2,
 
   // ----- Mic input -----
-  micGain: 12,                  // raw mic RMS is small (0.02–0.15); scale up before clamp
-  micSmoothing: 0.08,           // intensity EMA factor; lower = smoother
-  fftSize: 2048,                // FFT bin count
+  micGain: 12,
+  micSmoothing: 0.08,
+  fftSize: 2048,
 
   // ----- Pitch → hue (dominant frequency drives rainbow position) -----
-  pitchMinHz: 80,               // bottom of musical range used for centroid
-  pitchMaxHz: 5000,             // top of musical range
-  pitchHueRange: 300,           // pitch maps log-scale to [0°, this°] hue
-  pitchSmoothing: 0.08,         // smoother to avoid color flicker
-  hueFallback: 220,             // hue (deg) when there's no audio
-  intensityThreshold: 0.02,     // below this RMS, treat as silence
+  pitchMinHz: 80,
+  pitchMaxHz: 5000,
+  pitchHueRange: 300,
+  pitchSmoothing: 0.08,
+  hueFallback: 220,
+  intensityThreshold: 0.02,
 
-  // ----- BPM via spectral-flux autocorrelation -----
-  // ODF (onset detection function) = spectral flux over this freq range.
+  // ----- BPM detection -----
+  // Spectral-flux ODF + autocorrelation with comb filter + Gaussian prior
+  // + confidence gating + median smoothing + outlier rejection + tempo
+  // octave folding into [bpmOctaveMin, bpmOctaveMax].
   odfFreqMinHz: 60,
   odfFreqMaxHz: 4000,
-  odfBufferSize: 512,           // ~8.5 sec of recent onset strength at 60 Hz analysis
-  bpmEstimateIntervalMs: 400,   // re-run autocorrelation this often
-  bpmHistorySize: 24,           // median of last N confident estimates → detectedBpm
-  bpmPriorCenter: 110,          // Gaussian prior — peaks near here are preferred
-  bpmPriorStd: 70,              // std of the prior; smaller = sharper bias
-  // Estimates are only added to the history when the autocorrelation has a
-  // clearly dominant peak. Below threshold, the buffer keeps its previous
-  // value (or sits at fallback). This stops weak / beat-less sections from
-  // flipping the lock onto noise.
-  bpmConfidenceThreshold: 3.5,
-  bpmIdleResetMs: 4000,         // reset to fallback after this many ms with no confident estimate
-  bpmFallback: 75,
+  odfBufferSize: 512,             // ~8.5 sec of recent onsets at 60 Hz
+  bpmEstimateIntervalMs: 400,
+  bpmHistorySize: 24,
+  bpmPriorCenter: 110,
+  bpmPriorStd: 70,
+  bpmConfidenceThreshold: 4.0,    // raise the bar for committing an estimate
+  bpmIdleResetMs: 30000,          // hold the lock through long silences
+  bpmFallback: 35,                // "no music" slow idle tempo
   bpmMin: 50,
   bpmMax: 180,
-  // Tempo "octave" folding — any estimate outside this range is halved/doubled
-  // until it lands in range. Catches residual octave errors after scoring.
   bpmOctaveMin: 80,
   bpmOctaveMax: 160,
+  // Outlier rejection: a new confident estimate that's > this fraction away
+  // from the current median is treated as suspicious. It must repeat
+  // bpmOutlierConfirmations times consecutively before it can flush the
+  // existing lock — protects against a single bridge / bar where the
+  // algorithm latches onto a syncopated harmonic.
+  bpmOutlierTolerance: 0.15,
+  bpmOutlierConfirmations: 3,
 
   // ----- Bounce vertical amplitude (intensity-driven) -----
-  bounceMinAmpPx: 1,            // sprite-pixels of lift when silent
-  bounceMaxAmpPx: 14,           // sprite-pixels of lift at peak intensity
+  bounceMinAmpPx: 0.5,            // tiny when silent — barely a jiggle
+  bounceMaxAmpPx: 14,
+
+  // ----- Bounce deformation (intensity-driven) -----
+  // Selects which sprite frames cycle through during a bounce, so the
+  // *amount* of stretch/squash also scales with how loud the music is.
+  // Below intensityToFlatten: only NEUTRAL (no shape change).
+  // Below intensityToMidStretch: NEUTRAL except mid-stretch on the apex.
+  // Below intensityToFullStretch: NEUTRAL with full stretch on the apex.
+  // Above: full NEUTRAL → STRETCH → NEUTRAL → SQUASH cycle.
+  intensityToFlatten: 0.15,
+  intensityToMidStretch: 0.4,
+  intensityToFullStretch: 0.7,
+
+  // ----- Horizontal sway (kicks in when the music gets fast) -----
+  swayBpmThreshold: 105,          // sway begins above this BPM
+  swayMaxAmpPx: 6,                // peak side-to-side travel in sprite-pixels
+  swayBeatsPerCycle: 4,           // one full left-right-left over this many beats
 
   // ----- Debug overlay -----
-  showHud: true,                // top-left readout: detected BPM, pitch hue, intensity, fps
+  showHud: true,
 
   // ----- Palette (HSL per palette index) -----
   bodySaturation: 78,    bodyLightness: 55,

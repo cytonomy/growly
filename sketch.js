@@ -150,9 +150,11 @@ let bgBuffer = null;
 let startMs = 0;
 let lastDrawMs = 0;
 let bouncePhase = 0;          // 0..1, integrates over time at the current bounce period
+let swayPhase = 0;            // 0..2π, integrates over time at the current sway period
 let smoothedPitchHue = 0;     // smoothed mapping of dominant pitch → hue (deg)
 let detectedBpm = 0;          // smoothed tempo from autocorrelation
 let tempoEstimates = [];      // rolling buffer of recent raw BPM estimates
+let outlierCandidates = [];   // recent confident estimates that are far from the median
 let prevSpectrum = null;      // Uint8Array of last frame's bin magnitudes (for ODF delta)
 let odfBuffer = null;         // Float32Array ring buffer of onset-strength samples
 let odfHead = 0;              // next write index in odfBuffer
@@ -179,6 +181,8 @@ function setup() {
   smoothedPitchHue = cfg.hueFallback;
   detectedBpm = cfg.bpmFallback;
   tempoEstimates = [];
+  outlierCandidates = [];
+  swayPhase = 0;
   odfBuffer = new Float32Array(cfg.odfBufferSize);
   odfHead = 0;
   odfSampleCount = 0;
@@ -226,17 +230,29 @@ function draw() {
     renderY = lerp(slime.hopFromY, slime.hopToY, t) - lift;
     frame = hopFrameAt(t);
   } else {
-    // Idle bounce: BPM → period (one bounce per beat), intensity → vertical lift.
-    const bpm = intensity > cfg.intensityThreshold ? detectedBpm : cfg.bpmFallback;
+    // Idle bounce.
+    // BPM → period (one bounce per beat). When silent, BPM is bpmFallback so
+    // Growly does a slow micro-jiggle.
+    const bpm = detectedBpm;
     const period = 60000 / bpm;
-    const ampPx = lerp(cfg.bounceMinAmpPx, cfg.bounceMaxAmpPx, intensity);
     bouncePhase = (bouncePhase + dt / period) % 1;
-    const idx = Math.floor(bouncePhase * IDLE_FRAMES.length) % IDLE_FRAMES.length;
-    frame = IDLE_FRAMES[idx];
-    // Airborne in first half of the cycle (neutral→stretch→neutral),
-    // grounded in the second half (squash). Lift is one positive sine half-arch.
+    // Intensity → bounce amplitude AND deformation amount.
+    const ampPx = lerp(cfg.bounceMinAmpPx, cfg.bounceMaxAmpPx, intensity);
+    const quarter = Math.floor(bouncePhase * IDLE_FRAMES.length) % IDLE_FRAMES.length;
+    frame = frameForIntensity(quarter, intensity);
+    // Vertical lift: one positive sine half-arch over the first half of the cycle.
     const lift = Math.max(0, Math.sin(bouncePhase * Math.PI * 2)) * ampPx * cfg.renderScale;
     renderY = slime.y - lift;
+    // Horizontal sway when the music is fast — adds a side-to-side swing.
+    if (bpm >= cfg.swayBpmThreshold) {
+      const swayBpm = bpm / cfg.swayBeatsPerCycle;
+      const swayPeriodMs = 60000 / swayBpm;
+      swayPhase = (swayPhase + dt / swayPeriodMs * Math.PI * 2) % (Math.PI * 2);
+      const swayBlend = Math.min(1,
+        (bpm - cfg.swayBpmThreshold) / Math.max(1, cfg.bpmOctaveMax - cfg.swayBpmThreshold));
+      const swayAmp = swayBlend * cfg.swayMaxAmpPx * intensity;
+      renderX = slime.x + Math.sin(swayPhase) * swayAmp * cfg.renderScale;
+    }
   }
 
   drawSlime(renderX, renderY, frame, palette);
@@ -332,14 +348,27 @@ function analyzeSpectrum(now) {
     lastTempoEstMs = now;
     const fps = 1000 / avgAnalysisDt;
     const { bpm: rawBpm, confidence } = estimateTempoFromOdf(fps);
-    // Confidence-gated: only commit to a new estimate when the autocorrelation
-    // shows a clearly dominant peak. Sustains the previous lock during weak
-    // sections (intros, breakdowns) instead of latching onto spurious peaks.
+    // Confidence-gated: only consider an estimate when the autocorrelation
+    // has a clearly dominant peak.
     if (rawBpm > 0 && confidence >= cfg.bpmConfidenceThreshold) {
-      tempoEstimates.push(rawBpm);
-      if (tempoEstimates.length > cfg.bpmHistorySize) tempoEstimates.shift();
-      const sorted = tempoEstimates.slice().sort((a, b) => a - b);
-      const median = sorted[Math.floor(sorted.length / 2)];
+      const currentMedian = tempoEstimates.length
+        ? medianOf(tempoEstimates) : 0;
+      const drift = currentMedian > 0
+        ? Math.abs(rawBpm - currentMedian) / currentMedian
+        : 0;
+      if (currentMedian > 0 && drift > cfg.bpmOutlierTolerance) {
+        // Outlier — needs to repeat consecutively before flushing the lock.
+        outlierCandidates.push(rawBpm);
+        if (outlierCandidates.length >= cfg.bpmOutlierConfirmations) {
+          tempoEstimates = outlierCandidates.slice();
+          outlierCandidates = [];
+        }
+      } else {
+        outlierCandidates.length = 0;
+        tempoEstimates.push(rawBpm);
+        if (tempoEstimates.length > cfg.bpmHistorySize) tempoEstimates.shift();
+      }
+      const median = medianOf(tempoEstimates);
       detectedBpm = Math.max(cfg.bpmMin, Math.min(cfg.bpmMax, median));
       lastTempoUpdateMs = now;
     }
@@ -431,6 +460,19 @@ function hopFrameAt(t) {
   if (t < 0.78) return F_STRETCH;
   if (t < 0.90) return F_MID_STRETCH;
   return F_SQUASH;
+}
+
+// Idle-bounce frame selection grades the deformation amount by intensity:
+// silent → no shape change; loud → full squash/stretch cycle.
+function frameForIntensity(quarter, intensity) {
+  if (intensity < cfg.intensityToFlatten) return F_NEUTRAL;
+  if (intensity < cfg.intensityToMidStretch) {
+    return quarter === 1 ? F_MID_STRETCH : F_NEUTRAL;
+  }
+  if (intensity < cfg.intensityToFullStretch) {
+    return quarter === 1 ? F_STRETCH : F_NEUTRAL;
+  }
+  return IDLE_FRAMES[quarter];
 }
 
 function updateSlime(now) {
