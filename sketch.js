@@ -401,6 +401,12 @@ function analyzeSpectrum(now) {
   }
 }
 
+function medianOf(arr) {
+  if (!arr || !arr.length) return 0;
+  const sorted = arr.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 // Autocorrelate the ODF buffer to estimate beat period; convert to BPM.
 // Uses a comb filter (sums autocorr at L, 2L, 3L, 4L) so the true beat —
 // which reinforces multiple harmonics — beats octave-error candidates.
