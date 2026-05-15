@@ -30,6 +30,7 @@ Notable knobs:
 - `micSmoothing` — EMA on intensity used by bounce/sway (fast; lower = smoother)
 - `levelDisplaySmoothing` — EMA on the HUD `level%` readout only (slower; keeps the number from flickering while the animation stays responsive)
 - `bandBassHz` / `bandMidHz` / `bandHighHz` — frequency ranges (Hz) for each of the three band-energy buckets that drive color
+- `bandBassGain` / `bandMidGain` / `bandHighGain` — per-band weight multipliers. The natural music spectrum rolls off at high frequency so the high band reads weaker per bin; bump `bandHighGain` to make sparkly/cymbal moments register stronger.
 - `bandHighRedShare` / `bandHighBlueShare` — how much of the high-band energy leaks into R vs B; together they shape what "pure highs" look like (default both 0.9 = pink-magenta)
 - `ambientRgb` — `[r, g, b]` shown when `smoothedLevel` is below `intensityThreshold` (default light blue)
 - `pitchSmoothing` — EMA on the RGB color (lower = slower, more dramatic dwell)

@@ -22,9 +22,16 @@ window.GROWLY_CONFIG = {
   // unwanted hues. Bass adds R; mid adds G; high adds R+B (= magenta/pink).
   // bass+mid = yellow, mid+high = cyan-ish, all-bands = near-white, silence
   // = ambient blue.
-  bandBassHz:  [60,   300],       // kick / sub-bass / low strings → red
-  bandMidHz:   [300,  1500],      // vocals / guitars / mids       → green
-  bandHighHz:  [1500, 5000],      // cymbals / hats / air          → pink-magenta
+  bandBassHz:  [60,   250],       // kick / sub-bass / low strings → red
+  bandMidHz:   [250,  1000],      // vocals (fundamentals) / guitars → green
+  bandHighHz:  [1000, 6000],      // upper-vocal harmonics / cymbals / hats / air → pink-magenta
+  // Per-band gain compensates for the natural high-frequency rolloff of music —
+  // bass band routinely averages 2-3× more per-bin energy than the high band,
+  // so boosting high lets bright vocals/cymbals actually drive the color toward
+  // pink instead of always being dwarfed by bass.
+  bandBassGain: 1.0,
+  bandMidGain:  1.0,
+  bandHighGain: 2.5,
   bandHighRedShare:  0.9,         // how much high band leaks into R (1 = full pink, 0 = pure blue)
   bandHighBlueShare: 0.9,         // how much high band leaks into B
   ambientRgb: [0.15, 0.35, 1.0],  // shown when smoothedLevel < intensityThreshold (light blue)
