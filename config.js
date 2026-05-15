@@ -27,12 +27,17 @@ window.GROWLY_CONFIG = {
   // ODF (onset detection function) = spectral flux over this freq range.
   odfFreqMinHz: 60,
   odfFreqMaxHz: 4000,
-  odfBufferSize: 256,           // ~4 sec of recent onset strength at 60 Hz analysis
+  odfBufferSize: 512,           // ~8.5 sec of recent onset strength at 60 Hz analysis
   bpmEstimateIntervalMs: 400,   // re-run autocorrelation this often
-  bpmHistorySize: 12,           // median of last N raw estimates → detectedBpm
+  bpmHistorySize: 24,           // median of last N confident estimates → detectedBpm
   bpmPriorCenter: 110,          // Gaussian prior — peaks near here are preferred
-  bpmPriorStd: 50,              // std of the prior; smaller = sharper bias toward natural range
-  bpmIdleResetMs: 4000,         // reset to fallback after this many ms of silence
+  bpmPriorStd: 70,              // std of the prior; smaller = sharper bias
+  // Estimates are only added to the history when the autocorrelation has a
+  // clearly dominant peak. Below threshold, the buffer keeps its previous
+  // value (or sits at fallback). This stops weak / beat-less sections from
+  // flipping the lock onto noise.
+  bpmConfidenceThreshold: 3.5,
+  bpmIdleResetMs: 4000,         // reset to fallback after this many ms with no confident estimate
   bpmFallback: 75,
   bpmMin: 50,
   bpmMax: 180,

@@ -331,11 +331,13 @@ function analyzeSpectrum(now) {
   if (haveEnough && dueForUpdate && smoothedLevel >= cfg.intensityThreshold) {
     lastTempoEstMs = now;
     const fps = 1000 / avgAnalysisDt;
-    const rawBpm = estimateTempoFromOdf(fps);
-    if (rawBpm > 0) {
+    const { bpm: rawBpm, confidence } = estimateTempoFromOdf(fps);
+    // Confidence-gated: only commit to a new estimate when the autocorrelation
+    // shows a clearly dominant peak. Sustains the previous lock during weak
+    // sections (intros, breakdowns) instead of latching onto spurious peaks.
+    if (rawBpm > 0 && confidence >= cfg.bpmConfidenceThreshold) {
       tempoEstimates.push(rawBpm);
       if (tempoEstimates.length > cfg.bpmHistorySize) tempoEstimates.shift();
-      // Median of recent raw estimates — robust to single bad reads.
       const sorted = tempoEstimates.slice().sort((a, b) => a - b);
       const median = sorted[Math.floor(sorted.length / 2)];
       detectedBpm = Math.max(cfg.bpmMin, Math.min(cfg.bpmMax, median));
@@ -354,6 +356,10 @@ function analyzeSpectrum(now) {
 // Autocorrelate the ODF buffer to estimate beat period; convert to BPM.
 // Uses a comb filter (sums autocorr at L, 2L, 3L, 4L) so the true beat —
 // which reinforces multiple harmonics — beats octave-error candidates.
+// Returns { bpm, confidence } where confidence is the ratio of best raw
+// comb score to the mean comb score in range; > ~3 means a clearly
+// dominant peak (real beat), ~1 means the autocorrelation is flat (noise
+// or a section with no clear rhythm).
 function estimateTempoFromOdf(fps) {
   const N = odfBuffer.length;
 
@@ -385,11 +391,10 @@ function estimateTempoFromOdf(fps) {
   const twoStdSq = 2 * priorStd * priorStd;
   const harmonicWeights = [1.0, 0.8, 0.5, 0.3];
 
-  let bestLag = -1, bestScore = -Infinity;
+  let bestLag = -1, bestWeighted = -Infinity, bestRawComb = 0;
+  let combSum = 0, combCount = 0;
   for (let lag = minLag; lag <= maxLag; lag++) {
     // Comb filter: sum autocorr at L, 2L, 3L, 4L.
-    // A true beat at period L has strong correlation at every integer
-    // multiple; a spurious peak (e.g., the 2x harmonic) does not.
     let comb = 0;
     for (let k = 0; k < harmonicWeights.length; k++) {
       const hl = lag * (k + 1);
@@ -397,26 +402,27 @@ function estimateTempoFromOdf(fps) {
       comb += allScores[hl] * harmonicWeights[k];
     }
     if (comb <= 0) continue;
-    // Gaussian prior centered on a typical tempo (110 BPM) — keeps the
-    // algorithm from drifting to BPM extremes.
+    combSum += comb;
+    combCount++;
+    if (comb > bestRawComb) bestRawComb = comb;
+    // Gaussian prior — keep the algorithm from drifting to BPM extremes.
     const bpm = 60 * fps / lag;
     const prior = Math.exp(-((bpm - priorCenter) * (bpm - priorCenter)) / twoStdSq);
     const weighted = comb * prior;
-    if (weighted > bestScore) {
-      bestScore = weighted;
+    if (weighted > bestWeighted) {
+      bestWeighted = weighted;
       bestLag = lag;
     }
   }
 
-  if (bestLag < 0 || bestScore <= 0) return 0;
+  if (bestLag < 0 || bestWeighted <= 0) return { bpm: 0, confidence: 0 };
   let bpm = 60 * fps / bestLag;
-  // Tempo folding: an octave-error survivor (e.g., 180 BPM where the true is
-  // 90) gets halved or doubled into the presentation range [bpmOctaveMin,
-  // bpmOctaveMax]. Pragmatic — songs *near* this range read perfectly;
-  // songs well outside still produce musically related tempos.
+  // Tempo folding: half/double until inside the presentation range.
   while (bpm < cfg.bpmOctaveMin) bpm *= 2;
   while (bpm > cfg.bpmOctaveMax) bpm /= 2;
-  return bpm;
+  const meanComb = combCount > 0 ? combSum / combCount : 0;
+  const confidence = meanComb > 0 ? bestRawComb / meanComb : 0;
+  return { bpm, confidence };
 }
 
 function hopFrameAt(t) {
