@@ -836,14 +836,16 @@ let lastFaceLandmarks = null;
 async function ensureFaceTracker() {
   if (faceMesh) return true;
   if (typeof FaceMesh === 'undefined') {
-    console.error('Growly: MediaPipe FaceMesh failed to load from CDN');
+    console.error('Growly face: MediaPipe FaceMesh not loaded from CDN');
     return false;
   }
   try {
+    console.log('Growly face: requesting webcam…');
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width: 320, height: 240, facingMode: 'user' },
       audio: false,
     });
+    console.log('Growly face: webcam OK, attaching to <video>');
     faceVideo = document.createElement('video');
     faceVideo.style.display = 'none';
     faceVideo.playsInline = true;
@@ -851,6 +853,7 @@ async function ensureFaceTracker() {
     faceVideo.srcObject = stream;
     document.body.appendChild(faceVideo);
     await faceVideo.play();
+    console.log('Growly face: video playing; constructing FaceMesh');
 
     faceMesh = new FaceMesh({
       locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
@@ -866,23 +869,36 @@ async function ensureFaceTracker() {
         (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) || null;
     });
 
-    // Pump loop: keep sending frames while tracking is on. send() is async and
-    // self-paces, so awaiting it gives us natural backpressure rather than
-    // queuing up frames the model can't keep up with.
-    (async function pump() {
-      while (faceTrackingActive && faceMesh) {
-        if (faceVideo && faceVideo.readyState >= 2) {
-          try { await faceMesh.send({ image: faceVideo }); }
-          catch (e) { console.warn('Growly face send failed', e); }
-        } else {
-          await new Promise((r) => setTimeout(r, 50));
-        }
-      }
-    })();
+    console.log('Growly face: loading WASM + model…');
+    await faceMesh.initialize();
+    console.log('Growly face: ready');
+
+    // Event-driven pacing: requestVideoFrameCallback fires once per actual
+    // new camera frame (~30 Hz). After each frame we async-send to FaceMesh
+    // and only re-arm the callback once the send resolves, so we never
+    // pile up work the model can't keep up with.
+    const useRVFC = typeof faceVideo.requestVideoFrameCallback === 'function';
+    let inflight = false;
+    function pump() {
+      if (!faceTrackingActive || !faceMesh || !faceVideo) return;
+      if (inflight) return;
+      inflight = true;
+      faceMesh.send({ image: faceVideo })
+        .catch((e) => console.warn('Growly face send failed', e))
+        .finally(() => {
+          inflight = false;
+          if (faceTrackingActive && faceVideo) {
+            if (useRVFC) faceVideo.requestVideoFrameCallback(pump);
+            else setTimeout(pump, 33);
+          }
+        });
+    }
+    if (useRVFC) faceVideo.requestVideoFrameCallback(pump);
+    else setTimeout(pump, 33);
 
     return true;
   } catch (e) {
-    console.error('Growly face tracker init failed', e);
+    console.error('Growly face init failed:', e);
     return false;
   }
 }
