@@ -376,11 +376,19 @@ function analyzeSpectrum(now) {
     }
   }
 
-  // Reset to fallback after extended silence / no detection.
-  if (lastTempoUpdateMs > 0 && now - lastTempoUpdateMs > cfg.bpmIdleResetMs) {
-    tempoEstimates = [];
-    detectedBpm = cfg.bpmFallback;
-    lastTempoUpdateMs = 0;
+  // Silence-based reset: only drop the lock when the room is *actually* quiet
+  // for a sustained stretch. Quiet sections inside a song don't count because
+  // the lock is held by the median window, not by recent confident estimates.
+  if (smoothedLevel < cfg.intensityThreshold) {
+    if (silenceStartMs === 0) silenceStartMs = now;
+    if (now - silenceStartMs > cfg.silenceResetMs) {
+      tempoEstimates = [];
+      outlierCandidates = [];
+      detectedBpm = cfg.bpmFallback;
+      lastTempoUpdateMs = 0;
+    }
+  } else {
+    silenceStartMs = 0;
   }
 }
 
