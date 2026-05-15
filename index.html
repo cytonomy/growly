@@ -19,10 +19,30 @@
       image-rendering: crisp-edges;
       touch-action: none;
     }
+    #face-toggle {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 10;
+      padding: 8px 12px;
+      background: rgba(0, 0, 0, 0.55);
+      color: #eee;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      cursor: pointer;
+      touch-action: manipulation;
+      user-select: none;
+    }
+    #face-toggle:hover { background: rgba(0, 0, 0, 0.8); }
+    #face-toggle.on { border-color: rgba(0, 255, 120, 0.6); color: rgb(120, 255, 180); }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 </head>
 <body>
+  <button id="face-toggle" aria-label="Toggle face tracking overlay">Face tracking: OFF</button>
   <script>
     var v = Date.now();
     document.write('<script src="config.js?v=' + v + '"><\/script>');

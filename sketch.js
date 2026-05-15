@@ -323,6 +323,8 @@ function draw() {
   const eyeShift = Math.round(Math.sin(eyePhase) * cfg.eyeShiftMaxPx);
   drawSlime(renderX, renderY, frame, palette, eyeShift);
 
+  if (faceTrackingActive) drawFaceWireframe();
+
   if (cfg.showHud) drawHud();
 }
 
@@ -821,3 +823,122 @@ function windowResized() {
   slime.targetY = slime.y;
   rebuildBackground();
 }
+
+// ===== Face tracking (opt-in via #face-toggle button) =====
+// Lazy-init: webcam + MediaPipe FaceMesh only spin up after the user clicks
+// the toggle. While active, lastFaceLandmarks holds the most recent 468-point
+// landmark array, which drawFaceWireframe() overlays on the canvas every frame.
+let faceMesh = null;
+let faceVideo = null;
+let faceTrackingActive = false;
+let lastFaceLandmarks = null;
+
+async function ensureFaceTracker() {
+  if (faceMesh) return true;
+  if (typeof FaceMesh === 'undefined') {
+    console.error('Growly: MediaPipe FaceMesh failed to load from CDN');
+    return false;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 320, height: 240, facingMode: 'user' },
+      audio: false,
+    });
+    faceVideo = document.createElement('video');
+    faceVideo.style.display = 'none';
+    faceVideo.playsInline = true;
+    faceVideo.muted = true;
+    faceVideo.srcObject = stream;
+    document.body.appendChild(faceVideo);
+    await faceVideo.play();
+
+    faceMesh = new FaceMesh({
+      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+    });
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+    faceMesh.onResults((results) => {
+      lastFaceLandmarks =
+        (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) || null;
+    });
+
+    // Pump loop: keep sending frames while tracking is on. send() is async and
+    // self-paces, so awaiting it gives us natural backpressure rather than
+    // queuing up frames the model can't keep up with.
+    (async function pump() {
+      while (faceTrackingActive && faceMesh) {
+        if (faceVideo && faceVideo.readyState >= 2) {
+          try { await faceMesh.send({ image: faceVideo }); }
+          catch (e) { console.warn('Growly face send failed', e); }
+        } else {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+    })();
+
+    return true;
+  } catch (e) {
+    console.error('Growly face tracker init failed', e);
+    return false;
+  }
+}
+
+function drawFaceWireframe() {
+  if (!lastFaceLandmarks) return;
+  const lm = lastFaceLandmarks;
+  const tess = window.FACEMESH_TESSELATION;
+  push();
+  noFill();
+  stroke(120, 255, 180, 200);
+  strokeWeight(1);
+  // Mirror x: webcam shows the user as a selfie, so we flip to match the
+  // mental "mirror image" expectation.
+  if (tess && tess.length) {
+    for (let i = 0; i < tess.length; i++) {
+      const pair = tess[i];
+      const a = lm[pair[0]];
+      const b = lm[pair[1]];
+      if (!a || !b) continue;
+      line((1 - a.x) * width, a.y * height, (1 - b.x) * width, b.y * height);
+    }
+  } else {
+    // Fallback: tesselation constant not exposed by this CDN bundle — just
+    // dot every landmark.
+    noStroke();
+    fill(120, 255, 180, 220);
+    for (let i = 0; i < lm.length; i++) {
+      circle((1 - lm[i].x) * width, lm[i].y * height, 2);
+    }
+  }
+  pop();
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('face-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!faceTrackingActive) {
+      btn.textContent = 'Face tracking: starting…';
+      btn.disabled = true;
+      const ok = await ensureFaceTracker();
+      btn.disabled = false;
+      if (!ok) {
+        btn.textContent = 'Face tracking: failed';
+        return;
+      }
+      faceTrackingActive = true;
+      btn.classList.add('on');
+      btn.textContent = 'Face tracking: ON';
+    } else {
+      faceTrackingActive = false;
+      lastFaceLandmarks = null;
+      btn.classList.remove('on');
+      btn.textContent = 'Face tracking: OFF';
+    }
+  });
+});
