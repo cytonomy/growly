@@ -423,7 +423,7 @@ function analyzeSpectrum(now) {
   // ---------- Periodic tempo estimation ----------
   const haveEnough = odfSampleCount >= odfBuffer.length / 2;
   const dueForUpdate = now - lastTempoEstMs >= cfg.bpmEstimateIntervalMs;
-  if (haveEnough && dueForUpdate && smoothedLevel >= cfg.intensityThreshold) {
+  if (haveEnough && dueForUpdate && smoothedLevel >= cfg.silenceResetIntensity) {
     lastTempoEstMs = now;
     const fps = 1000 / avgAnalysisDt;
     const { bpm: rawBpm, confidence } = estimateTempoFromOdf(fps);

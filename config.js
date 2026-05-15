@@ -46,7 +46,7 @@ window.GROWLY_CONFIG = {
   // octave folding into [bpmOctaveMin, bpmOctaveMax].
   odfFreqMinHz: 60,
   odfFreqMaxHz: 4000,
-  odfBufferSize: 512,             // ~8.5 sec of recent onsets at 60 Hz
+  odfBufferSize: 256,             // ~4.3 sec of recent onsets at 60 Hz (analysis starts at half-full → ~2s warmup before first lock attempt)
   bpmEstimateIntervalMs: 400,
   bpmHistorySize: 24,
   bpmPriorCenter: 110,
