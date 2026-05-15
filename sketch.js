@@ -214,6 +214,7 @@ let freqBuf = null;           // frequency-domain (centroid + ODF)
 let micActive = false;
 let smoothedLevel = 0;        // intensity (drives bounce/sway/etc — fast EMA)
 let displayLevel = 0;         // intensity for the HUD readout — slower EMA so the % doesn't flicker
+let rhythmPresence = 0;       // [0..1] gate from ODF coefficient-of-variation; suppresses broadband noise (plane airflow, HVAC) that has high RMS but no rhythmic structure
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -254,9 +255,13 @@ function draw() {
   const dt = Math.min(100, now - lastDrawMs);
   lastDrawMs = now;
 
-  // Intensity: smooth raw mic RMS into [0..1].
+  // Intensity: raw mic RMS × gain, GATED by the rhythm-presence signal so
+  // broadband noise (plane airflow, HVAC, fan hum) — which has high RMS but
+  // no rhythmic structure in its spectral flux — doesn't drive Growly. The
+  // gate value is recomputed inside analyzeSpectrum below and reaches 1.0
+  // only when the ODF shows clear onset peaks (= music).
   const rawLevel = readMicRms();
-  const targetLevel = Math.min(1, rawLevel * cfg.micGain);
+  const targetLevel = Math.min(1, rawLevel * cfg.micGain) * rhythmPresence;
   smoothedLevel += (targetLevel - smoothedLevel) * cfg.micSmoothing;
   displayLevel += (smoothedLevel - displayLevel) * cfg.levelDisplaySmoothing;
   const intensity = smoothedLevel;
@@ -364,7 +369,7 @@ function drawHud() {
   const lines = [
     `BPM   ${micActive ? Math.round(detectedBpm) : '—'}`,
     `hue   ${Math.round(rgbToHsl(smoothedR, smoothedG, smoothedB).h)}°`,
-    `level ${(displayLevel * 100).toFixed(0)}%`,
+    `level ${(displayLevel * 100).toFixed(0)}% (gate ${Math.round(rhythmPresence * 100)}%)`,
     `odf   ${odfSampleCount}/${cfg.odfBufferSize}`,
     `fps   ${(1000 / avgAnalysisDt).toFixed(0)}`,
   ];
@@ -460,6 +465,32 @@ function analyzeSpectrum(now) {
     if (dt > 0 && dt < 200) avgAnalysisDt = avgAnalysisDt * 0.9 + dt * 0.1;
   }
   lastAnalysisMs = now;
+
+  // ---------- Rhythm presence (coefficient of variation of ODF) ----------
+  // White / broadband noise (plane airflow, fan hum) produces a continuously
+  // flat ODF — high mean, low variance, low std/mean. Music with kicks,
+  // snares and vocals produces ODF that spikes at onsets and is near-zero
+  // between them — std/mean ratio is much higher. Gate the audio-driven
+  // animation on this ratio so noise can't drive the bounce.
+  const presN = Math.min(odfSampleCount, odfBuffer.length);
+  let presenceTarget = 0;
+  if (presN >= 16) {
+    let m = 0;
+    for (let i = 0; i < presN; i++) m += odfBuffer[i];
+    m /= presN;
+    if (m > 0.5) {
+      let v = 0;
+      for (let i = 0; i < presN; i++) {
+        const d = odfBuffer[i] - m;
+        v += d * d;
+      }
+      v /= presN;
+      const cv = Math.sqrt(v) / m;
+      const lo = cfg.rhythmCvFloor, hi = cfg.rhythmCvCeiling;
+      presenceTarget = Math.max(0, Math.min(1, (cv - lo) / Math.max(0.01, hi - lo)));
+    }
+  }
+  rhythmPresence += (presenceTarget - rhythmPresence) * cfg.rhythmPresenceSmoothing;
 
   // ---------- Periodic tempo estimation ----------
   const haveEnough = odfSampleCount >= cfg.odfWarmupFrames;

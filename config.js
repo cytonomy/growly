@@ -14,6 +14,15 @@ window.GROWLY_CONFIG = {
   micGain: 32,                    // typical room-listening volume lands around 40-60%; only the loudest peaks reach 100%
   micSmoothing: 0.022,            // EMA factor on intensity — lower = slower buildup; 0.022 ≈ 1.5s to ramp up to a loud peak
   levelDisplaySmoothing: 0.04,    // EMA factor on the HUD level% readout (slow — keeps it from flickering)
+
+  // ----- Rhythm-presence gate -----
+  // Distinguishes music (spiky onset pattern) from broadband noise (flat).
+  // The signal is std/mean of the ODF buffer; music sits ~0.8-2.0, white
+  // noise sits ~0.2-0.4. Below rhythmCvFloor → gate = 0, above
+  // rhythmCvCeiling → gate = 1, linear in between.
+  rhythmCvFloor: 0.55,
+  rhythmCvCeiling: 1.10,
+  rhythmPresenceSmoothing: 0.04,
   fftSize: 2048,
 
   // ----- Spectral bands → RGB color -----
