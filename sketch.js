@@ -234,10 +234,13 @@ function draw() {
   } else {
     // Idle bounce.
     // BPM → period (one bounce per beat). When silent, BPM is bpmFallback so
-    // Growly does a slow micro-jiggle.
-    const bpm = detectedBpm;
+    // Growly does a slow micro-jiggle. Defensive: clamp BPM so a bad
+    // detection can't push period to 0 / Infinity / NaN and freeze the phase.
+    let bpm = detectedBpm;
+    if (!isFinite(bpm) || bpm < 1) bpm = cfg.bpmFallback;
     const period = 60000 / bpm;
     bouncePhase = (bouncePhase + dt / period) % 1;
+    if (!isFinite(bouncePhase)) bouncePhase = 0;
     // Intensity → bounce amplitude AND deformation amount.
     const ampPx = lerp(cfg.bounceMinAmpPx, cfg.bounceMaxAmpPx, intensity);
     const quarter = Math.floor(bouncePhase * IDLE_FRAMES.length) % IDLE_FRAMES.length;
@@ -250,12 +253,18 @@ function draw() {
       const swayBpm = bpm / cfg.swayBeatsPerCycle;
       const swayPeriodMs = 60000 / swayBpm;
       swayPhase = (swayPhase + dt / swayPeriodMs * Math.PI * 2) % (Math.PI * 2);
+      if (!isFinite(swayPhase)) swayPhase = 0;
       const swayBlend = Math.min(1,
         (bpm - cfg.swayBpmThreshold) / Math.max(1, cfg.bpmOctaveMax - cfg.swayBpmThreshold));
       const swayAmp = swayBlend * cfg.swayMaxAmpPx * intensity;
       renderX = slime.x + Math.sin(swayPhase) * swayAmp * cfg.renderScale;
     }
   }
+  // Final guard: never let render coordinates escape the canvas via accumulated
+  // drift, NaN, or Infinity. Worst case Growly snaps to centre, but he's still
+  // visible — beats disappearing.
+  if (!isFinite(renderX) || renderX < -SPRITE_W * cfg.renderScale || renderX > width + SPRITE_W * cfg.renderScale) renderX = width / 2;
+  if (!isFinite(renderY) || renderY < -SPRITE_H * cfg.renderScale || renderY > height + SPRITE_H * cfg.renderScale) renderY = height / 2;
 
   drawSlime(renderX, renderY, frame, palette);
 
@@ -476,13 +485,15 @@ function hopFrameAt(t) {
 // Even at zero intensity Growly shows a subtle apex stretch so the loop
 // is always visibly animating, not just hovering.
 function frameForIntensity(quarter, intensity) {
+  if (!isFinite(intensity)) intensity = 0;
+  if (!Number.isInteger(quarter) || quarter < 0 || quarter >= IDLE_FRAMES.length) quarter = 0;
   if (intensity < cfg.intensityToFullStretch) {
     return quarter === 1 ? F_MID_STRETCH : F_NEUTRAL;
   }
   if (intensity < cfg.intensityToFullSquash) {
     return quarter === 1 ? F_STRETCH : F_NEUTRAL;
   }
-  return IDLE_FRAMES[quarter];
+  return IDLE_FRAMES[quarter] || F_NEUTRAL;
 }
 
 function updateSlime(now) {
@@ -511,16 +522,25 @@ function updateSlime(now) {
 }
 
 function drawSlime(cx, cy, frame, palette) {
+  // Defensive: never let a bad input silently make Growly invisible.
+  if (!isFinite(cx)) cx = width / 2;
+  if (!isFinite(cy)) cy = height / 2;
+  if (!frame || !Array.isArray(frame) || frame.length !== SPRITE_H) frame = F_NEUTRAL;
+  if (!palette || !palette[1]) palette = paletteForHue(cfg.hueFallback);
+
   const s = cfg.renderScale;
   const ox = Math.round(cx - (SPRITE_W * s) / 2);
   const oy = Math.round(cy - (SPRITE_H * s) / 2);
 
   for (let y = 0; y < SPRITE_H; y++) {
     const row = frame[y];
+    if (!row) continue;
     for (let x = 0; x < SPRITE_W; x++) {
       const idx = row.charCodeAt(x) - 48;
       if (idx === 0) continue;
-      fill(palette[idx]);
+      const c = palette[idx];
+      if (!c) continue;
+      fill(c);
       rect(ox + x * s, oy + y * s, s, s);
     }
   }
