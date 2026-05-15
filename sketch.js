@@ -755,17 +755,25 @@ function readMicRms() {
   return Math.sqrt(sumSq / micBuffer.length);
 }
 
-function mousePressed() {
+function handlePress(event) {
+  // Clicks on the floating Face-tracking toggle should NOT make Growly hop —
+  // that button lives outside the canvas as a fixed-position DOM element.
+  if (event && event.target && event.target.tagName === 'BUTTON') return false;
   ensureMicStarted();
+  // Face tracking is on by default; kick off init on the first user gesture
+  // since getUserMedia requires one.
+  if (faceTrackingActive && !faceMesh) {
+    ensureFaceTracker().then((ok) => {
+      if (ok) startFacePump(); else faceTrackingActive = false;
+      updateFaceButton();
+    });
+  }
   setTarget(mouseX, mouseY);
   return false;
 }
 
-function touchStarted() {
-  ensureMicStarted();
-  setTarget(mouseX, mouseY);
-  return false;
-}
+function mousePressed(event) { return handlePress(event); }
+function touchStarted(event) { return handlePress(event); }
 
 function setTarget(x, y) {
   slime.targetX = x;
@@ -824,82 +832,112 @@ function windowResized() {
   rebuildBackground();
 }
 
-// ===== Face tracking (opt-in via #face-toggle button) =====
-// Lazy-init: webcam + MediaPipe FaceMesh only spin up after the user clicks
-// the toggle. While active, lastFaceLandmarks holds the most recent 468-point
-// landmark array, which drawFaceWireframe() overlays on the canvas every frame.
+// ===== Face tracking =====
+// ON by default; actual init (webcam + WASM) is deferred until the first
+// user gesture since getUserMedia requires one. Toggling the button OFF then
+// ON re-arms the pump loop without re-initializing the mesh.
 let faceMesh = null;
 let faceVideo = null;
-let faceTrackingActive = false;
+let faceTrackingActive = true;
 let lastFaceLandmarks = null;
+let faceMeshInitPromise = null;
+let facePumpInflight = false;
+let facePumpScheduled = false;
 
 async function ensureFaceTracker() {
   if (faceMesh) return true;
+  if (faceMeshInitPromise) return faceMeshInitPromise;
   if (typeof FaceMesh === 'undefined') {
     console.error('Growly face: MediaPipe FaceMesh not loaded from CDN');
     return false;
   }
-  try {
-    console.log('Growly face: requesting webcam…');
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 320, height: 240, facingMode: 'user' },
-      audio: false,
-    });
-    console.log('Growly face: webcam OK, attaching to <video>');
-    faceVideo = document.createElement('video');
-    faceVideo.style.display = 'none';
-    faceVideo.playsInline = true;
-    faceVideo.muted = true;
-    faceVideo.srcObject = stream;
-    document.body.appendChild(faceVideo);
-    await faceVideo.play();
-    console.log('Growly face: video playing; constructing FaceMesh');
+  faceMeshInitPromise = (async () => {
+    try {
+      console.log('Growly face: requesting webcam…');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 320, height: 240, facingMode: 'user' },
+        audio: false,
+      });
+      console.log('Growly face: webcam OK, attaching to <video>');
+      faceVideo = document.createElement('video');
+      faceVideo.style.display = 'none';
+      faceVideo.playsInline = true;
+      faceVideo.muted = true;
+      faceVideo.srcObject = stream;
+      document.body.appendChild(faceVideo);
+      await faceVideo.play();
+      console.log('Growly face: video playing; constructing FaceMesh');
 
-    faceMesh = new FaceMesh({
-      locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
-    });
-    faceMesh.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
-    faceMesh.onResults((results) => {
-      lastFaceLandmarks =
-        (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) || null;
-    });
-
-    console.log('Growly face: loading WASM + model…');
-    await faceMesh.initialize();
-    console.log('Growly face: ready');
-
-    // Throttled inference loop. Face mesh inference is heavy (~30-80 ms per
-    // call on lower-spec machines), so we cap to ~12 Hz (cfg.faceInferenceMinGapMs)
-    // — plenty for tracking a slowly-moving human face and a fraction of the
-    // CPU budget compared to running every camera frame. inflight guards
-    // against piling up work the model can't finish in time.
-    let inflight = false;
-    function pump() {
-      if (!faceTrackingActive || !faceMesh || !faceVideo) return;
-      if (inflight) return;
-      inflight = true;
-      const t0 = performance.now();
-      faceMesh.send({ image: faceVideo })
-        .catch((e) => console.warn('Growly face send failed', e))
-        .finally(() => {
-          inflight = false;
-          if (!faceTrackingActive) return;
-          const elapsed = performance.now() - t0;
-          const delay = Math.max(0, cfg.faceInferenceMinGapMs - elapsed);
-          setTimeout(pump, delay);
-        });
+      const mesh = new FaceMesh({
+        locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+      });
+      mesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+      mesh.onResults((results) => {
+        lastFaceLandmarks =
+          (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) || null;
+      });
+      console.log('Growly face: loading WASM + model…');
+      await mesh.initialize();
+      console.log('Growly face: ready');
+      faceMesh = mesh;
+      return true;
+    } catch (e) {
+      console.error('Growly face init failed:', e);
+      faceMeshInitPromise = null;  // allow a retry
+      return false;
     }
-    setTimeout(pump, 0);
+  })();
+  return faceMeshInitPromise;
+}
 
-    return true;
-  } catch (e) {
-    console.error('Growly face init failed:', e);
-    return false;
+// Throttled inference loop. Face mesh inference is heavy (~30-80 ms per call
+// on lower-spec machines), so we cap to cfg.faceInferenceMinGapMs (~12 Hz).
+// facePumpScheduled prevents duplicate timers when the user re-toggles ON.
+function facePumpStep() {
+  facePumpScheduled = false;
+  if (!faceTrackingActive || !faceMesh || !faceVideo) {
+    facePumpInflight = false;
+    return;
+  }
+  if (facePumpInflight) return;
+  facePumpInflight = true;
+  const t0 = performance.now();
+  faceMesh.send({ image: faceVideo })
+    .catch((e) => console.warn('Growly face send failed', e))
+    .finally(() => {
+      facePumpInflight = false;
+      if (!faceTrackingActive) return;
+      const elapsed = performance.now() - t0;
+      const delay = Math.max(0, cfg.faceInferenceMinGapMs - elapsed);
+      facePumpScheduled = true;
+      setTimeout(facePumpStep, delay);
+    });
+}
+
+function startFacePump() {
+  if (facePumpScheduled || facePumpInflight) return;
+  if (!faceTrackingActive || !faceMesh) return;
+  facePumpScheduled = true;
+  setTimeout(facePumpStep, 0);
+}
+
+function updateFaceButton() {
+  const btn = document.getElementById('face-toggle');
+  if (!btn) return;
+  if (faceTrackingActive && faceMesh) {
+    btn.classList.add('on');
+    btn.textContent = 'Face tracking: ON';
+  } else if (faceTrackingActive && !faceMesh) {
+    btn.classList.remove('on');
+    btn.textContent = 'Face tracking: ON (tap Growly)';
+  } else {
+    btn.classList.remove('on');
+    btn.textContent = 'Face tracking: OFF';
   }
 }
 
@@ -939,28 +977,31 @@ function drawFaceWireframe() {
 window.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('face-toggle');
   if (!btn) return;
+  updateFaceButton();  // initial state: "ON (tap Growly)" because we default-on
   btn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (!faceTrackingActive) {
-      // Flip flag BEFORE awaiting init so the pump loop inside
-      // ensureFaceTracker sees it as true and keeps running.
-      faceTrackingActive = true;
-      btn.textContent = 'Face tracking: starting…';
-      btn.disabled = true;
-      const ok = await ensureFaceTracker();
-      btn.disabled = false;
-      if (!ok) {
-        faceTrackingActive = false;
-        btn.textContent = 'Face tracking: failed';
-        return;
-      }
-      btn.classList.add('on');
-      btn.textContent = 'Face tracking: ON';
-    } else {
+    if (faceTrackingActive) {
+      // Turn off
       faceTrackingActive = false;
       lastFaceLandmarks = null;
-      btn.classList.remove('on');
-      btn.textContent = 'Face tracking: OFF';
+      updateFaceButton();
+    } else {
+      // Turn on. If the mesh hasn't been initialized yet (first activation
+      // ever), do that now; otherwise just re-arm the pump.
+      faceTrackingActive = true;
+      if (!faceMesh) {
+        btn.disabled = true;
+        btn.textContent = 'Face tracking: starting…';
+        const ok = await ensureFaceTracker();
+        btn.disabled = false;
+        if (!ok) {
+          faceTrackingActive = false;
+          btn.textContent = 'Face tracking: failed';
+          return;
+        }
+      }
+      startFacePump();
+      updateFaceButton();
     }
   });
 });
