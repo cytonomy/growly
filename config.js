@@ -46,10 +46,10 @@ window.GROWLY_CONFIG = {
   bandHighRedShare:  0.9,         // how much high band leaks into R (1 = full pink, 0 = pure blue)
   bandHighBlueShare: 0.9,         // how much high band leaks into B
   ambientRgb: [0.15, 0.35, 1.0],  // shown when smoothedLevel < intensityThreshold (light blue)
-  pitchSmoothing: 0.06,           // EMA on the RGB color — lower = slower dwell
+  pitchSmoothing: 0.18,           // EMA on the RGB color — lower = slower dwell. Bumped up so "music stopped" lets the color drift back to ambient blue in a couple seconds, not 10+.
   hueFallback: 220,               // hue used only when the smoothed RGB is gray (saturation ≈ 0)
-  intensityThreshold: 0.15,       // gates pitch/color: below this, color falls back to ambient blue (lowered from 0.30 — typical music levels often dipped below 30%, so color was stuck on ambient blue)
-  silenceResetIntensity: 0.08,    // gates BPM silence-reset: only count the room as silent for BPM purposes when smoothedLevel is REALLY low (quiet song sections should NOT trigger reset)
+  intensityThreshold: 0.22,       // gates pitch/color: below this, color targets ambient blue. Raised from 0.15 so room background noise (which often parks smoothedLevel around 0.15-0.20) doesn't keep the color stuck on the last music-driven hue.
+  silenceResetIntensity: 0.18,    // gates BPM silence-reset. Raised from 0.08 so the same room-noise floor that ungates color also triggers BPM fallback.
 
   // ----- BPM detection -----
   // Spectral-flux ODF + autocorrelation with comb filter + Gaussian prior
@@ -82,7 +82,7 @@ window.GROWLY_CONFIG = {
   // bpmFallback. This is the only thing that resets the tempo — silence
   // BETWEEN confident estimates (e.g., a quiet bridge in a song) doesn't
   // count, only actual quiet does.
-  silenceResetMs: 15000,
+  silenceResetMs: 4000,           // 4 seconds of room-noise-or-below → drop BPM back to bpmFallback. Was 15s; shortened so "song ended" feels like Growly disengages, not "Growly remembers the BPM from a minute ago."
 
   // ----- Bounce vertical amplitude (intensity-driven) -----
   bounceMinAmpPx: 0.5,            // tiny when silent — barely a jiggle
