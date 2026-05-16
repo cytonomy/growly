@@ -48,8 +48,16 @@ window.GROWLY_CONFIG = {
   ambientRgb: [0.15, 0.35, 1.0],  // shown when smoothedLevel < intensityThreshold (light blue)
   pitchSmoothing: 0.18,           // EMA on the RGB color — lower = slower dwell. Bumped up so "music stopped" lets the color drift back to ambient blue in a couple seconds, not 10+.
   hueFallback: 220,               // hue used only when the smoothed RGB is gray (saturation ≈ 0)
-  intensityThreshold: 0.22,       // gates pitch/color: below this, color targets ambient blue. Raised from 0.15 so room background noise (which often parks smoothedLevel around 0.15-0.20) doesn't keep the color stuck on the last music-driven hue.
-  silenceResetIntensity: 0.18,    // gates BPM silence-reset. Raised from 0.08 so the same room-noise floor that ungates color also triggers BPM fallback.
+  intensityThreshold: 0.18,       // gates pitch/color: below this, color targets ambient blue. Combined with the rhythm-presence gate below — both must be true for spectrum-driven color.
+  silenceResetIntensity: 0.15,    // gates BPM silence-reset clock. Combined with the rhythm-presence gate.
+  // Color + BPM stay locked to a music-driven state only when there's
+  // actual rhythmic structure (kicks / snares / vocal onsets). Background
+  // room noise (fan, A/C, breathing) has high RMS but a flat ODF — its
+  // rhythm-presence sits near zero, so we treat it as silence for the
+  // purpose of color / BPM even if smoothedLevel happens to be above
+  // intensityThreshold. Bouncing is intentionally NOT gated on this, so
+  // even non-rhythmic loud sound (someone talking) still moves Growly.
+  rhythmGateForColor: 0.05,
 
   // ----- BPM detection -----
   // Spectral-flux ODF + autocorrelation with comb filter + Gaussian prior

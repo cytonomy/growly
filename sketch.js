@@ -463,7 +463,11 @@ function analyzeSpectrum(now) {
   let targetR = cfg.ambientRgb[0];
   let targetG = cfg.ambientRgb[1];
   let targetB = cfg.ambientRgb[2];
-  if (smoothedLevel >= cfg.intensityThreshold) {
+  // Music-driven color only if BOTH (a) the level is above the silence
+  // threshold and (b) the ODF shows rhythmic structure. Background room
+  // noise can clear (a) but never (b) — gating on (b) too is what stops
+  // an idle room from parking the hue on yellow.
+  if (smoothedLevel >= cfg.intensityThreshold && rhythmPresence >= cfg.rhythmGateForColor) {
     const eB = bandEnergy(cfg.bandBassHz[0], cfg.bandBassHz[1]) * cfg.bandBassGain;
     const eM = bandEnergy(cfg.bandMidHz[0], cfg.bandMidHz[1])   * cfg.bandMidGain;
     const eH = bandEnergy(cfg.bandHighHz[0], cfg.bandHighHz[1]) * cfg.bandHighGain;
@@ -580,11 +584,13 @@ function analyzeSpectrum(now) {
     }
   }
 
-  // Silence-based reset: only drop the lock when the room is *actually* quiet
-  // for a sustained stretch. Uses its own lower threshold so quiet sections
-  // inside a song don't reset the lock (the color-ambient threshold above is
-  // higher and serves a different purpose).
-  if (smoothedLevel < cfg.silenceResetIntensity) {
+  // Silence-based reset: drop the BPM lock when the room is genuinely
+  // quiet OR when the input has lost rhythmic structure. Mirrors the
+  // color gate above so the two stay in sync — once the user stops the
+  // music, both color and BPM disengage together.
+  const isSilent = smoothedLevel < cfg.silenceResetIntensity ||
+                   rhythmPresence < cfg.rhythmGateForColor;
+  if (isSilent) {
     if (silenceStartMs === 0) silenceStartMs = now;
     if (now - silenceStartMs > cfg.silenceResetMs) {
       tempoEstimates = [];
@@ -595,6 +601,18 @@ function analyzeSpectrum(now) {
   } else {
     silenceStartMs = 0;
   }
+
+  // Debug surface — read in DevTools (or via Claude-in-Chrome) to see
+  // why color / BPM is or isn't decaying. window.__growly is the only
+  // sketch-internal state exposed; it intentionally has no setters.
+  window.__growly = {
+    smoothedLevel,
+    rhythmPresence,
+    smoothedR, smoothedG, smoothedB,
+    detectedBpm,
+    audioState: audioCtx ? audioCtx.state : 'no ctx',
+    silenceMs: silenceStartMs ? (now - silenceStartMs) : 0,
+  };
 }
 
 function medianOf(arr) {
