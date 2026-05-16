@@ -273,13 +273,14 @@ function draw() {
     audioCtx.resume().catch(() => {});
   }
 
-  // Intensity: raw mic RMS × gain, GATED by the rhythm-presence signal so
-  // broadband noise (plane airflow, HVAC, fan hum) — which has high RMS but
-  // no rhythmic structure in its spectral flux — doesn't drive Growly. The
-  // gate value is recomputed inside analyzeSpectrum below and reaches 1.0
-  // only when the ODF shows clear onset peaks (= music).
+  // Intensity: raw mic RMS × gain. The rhythm-presence gate (computed
+  // in analyzeSpectrum, displayed in the HUD) was previously multiplied
+  // in here to reject broadband noise like plane airflow — but in
+  // practice it was rejecting real music too, so Growly stopped
+  // reacting. We still surface the value in the HUD for visibility but
+  // no longer let it cut the bounce.
   const rawLevel = readMicRms();
-  const targetLevel = Math.min(1, rawLevel * cfg.micGain) * rhythmPresence;
+  const targetLevel = Math.min(1, rawLevel * cfg.micGain);
   smoothedLevel += (targetLevel - smoothedLevel) * cfg.micSmoothing;
   displayLevel += (smoothedLevel - displayLevel) * cfg.levelDisplaySmoothing;
   const intensity = smoothedLevel;
@@ -823,10 +824,12 @@ const EYE_TPL_H = 18;
 // Rows 1..16 inclusive, cols 1..7 inclusive (7 cols × 16 rows of white).
 const EYE_SCLERA_X0 = 1, EYE_SCLERA_X1 = 7;
 const EYE_SCLERA_Y0 = 1, EYE_SCLERA_Y1 = 16;
-// Movable pupil size in fine cells. Kept small enough that meaningful
-// white margin stays visible around it at every gaze position.
-const EYE_PUPIL_FW = 3;
-const EYE_PUPIL_FH = 4;
+// Movable pupil size in fine cells. Sized so the black silhouette is
+// chunky-anime — ~71% of sclera width, ~50% of sclera height — while
+// still leaving 2 cols × 8 rows of pupil-position travel for face / gaze
+// tracking to read as visible eye motion.
+const EYE_PUPIL_FW = 5;
+const EYE_PUPIL_FH = 8;
 const EYE_CHAR_TO_IDX = { '.': 0, O: 4, S: 5 };
 
 // Render one detailed anime eye over a body-cell pupil bbox. Fine pixel
