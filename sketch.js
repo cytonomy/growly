@@ -783,52 +783,51 @@ function eyeBoxesFor(frame) {
   return boxes;
 }
 
-// Fine-pixel anime eye template. Used by drawDetailedEye() — rendered at
+// Fine-pixel eye template. Used by drawDetailedEye() — rendered at
 // cfg.eyeHires fine pixels per body cell over each body pupil bbox.
 //
 // Width = (pupil cells wide) × eyeHires = 3 × 3 = 9 fine cols.
 // Height = (pupil cells tall) × eyeHires = 6 × 3 = 18 fine rows.
 //
 // Char legend:
-//   .  transparent (body color shows through)
+//   .  transparent (body color shows through at rounded corners)
 //   O  eyelid outline (palette[4], near-black)
-//   S  sclera        (palette[5], off-white)
-//   I  iris          (palette[6], saturated body hue)
+//   S  sclera        (palette[5], off-white) — fills the whole interior
 //
-// The PUPIL is NOT baked into the template — it slides as a separate
-// 3w×5h block over the iris based on eyeTx/eyeTy, so the eye-follow
-// motion is visible across the whole pupil (not just a 1-cell highlight).
-// Highlight (palette[7]) rides along on the pupil's upper-left cell.
+// No iris layer — per user, the eye is just "white outside + black
+// movable pupil inside." The pupil + highlight overlay is drawn on top
+// of the template by drawDetailedEye.
 const EYE_TEMPLATE = [
   '.OOOOOOO.',
   'OSSSSSSSO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
-  'OSIIIIISO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
+  'OSSSSSSSO',
   'OSSSSSSSO',
   '.OOOOOOO.',
 ];
 const EYE_TPL_W = 9;
 const EYE_TPL_H = 18;
-// Iris rect inside the template — where the movable pupil can roam.
-// Rows 2..15 inclusive, cols 2..6 inclusive (5 cols × 14 rows of iris).
-const EYE_IRIS_X0 = 2, EYE_IRIS_X1 = 6;
-const EYE_IRIS_Y0 = 2, EYE_IRIS_Y1 = 15;
-// Movable pupil size in fine cells.
+// Sclera rect inside the template — where the movable pupil can roam.
+// Rows 1..16 inclusive, cols 1..7 inclusive (7 cols × 16 rows of white).
+const EYE_SCLERA_X0 = 1, EYE_SCLERA_X1 = 7;
+const EYE_SCLERA_Y0 = 1, EYE_SCLERA_Y1 = 16;
+// Movable pupil size in fine cells. Kept small enough that meaningful
+// white margin stays visible around it at every gaze position.
 const EYE_PUPIL_FW = 3;
-const EYE_PUPIL_FH = 5;
-const EYE_CHAR_TO_IDX = { '.': 0, O: 4, S: 5, I: 6 };
+const EYE_PUPIL_FH = 4;
+const EYE_CHAR_TO_IDX = { '.': 0, O: 4, S: 5 };
 
 // Render one detailed anime eye over a body-cell pupil bbox. Fine pixel
 // boundaries are integer-rounded so adjacent cells don't leave gaps when
@@ -878,16 +877,15 @@ function drawDetailedEye(b, eyeTx, eyeTy, palette, s, ox, oy) {
       fineRect(tx, ty, 1, 1);
     }
   }
-  // Pass B: the pupil — a movable EYE_PUPIL_FW × EYE_PUPIL_FH block that
-  // slides inside the iris based on eyeTx / eyeTy. Sliding the whole
-  // pupil (rather than only a 1-cell highlight) makes the eye-follow
-  // motion visible at a glance.
-  const irisW = EYE_IRIS_X1 - EYE_IRIS_X0 + 1;     // 5
-  const irisH = EYE_IRIS_Y1 - EYE_IRIS_Y0 + 1;     // 14
-  const xRange = irisW - EYE_PUPIL_FW;             // 2 — pupil-start cols 2..4
-  const yRange = irisH - EYE_PUPIL_FH;             // 9 — pupil-start rows 2..11
-  const pupilCol = EYE_IRIS_X0 + Math.ceil((eyeTx + 1) * 0.5 * xRange - 0.5);
-  const pupilRow = EYE_IRIS_Y0 + Math.ceil((eyeTy + 1) * 0.5 * yRange - 0.5);
+  // Pass B: the pupil — a movable EYE_PUPIL_FW × EYE_PUPIL_FH black block
+  // that slides across the white sclera based on eyeTx / eyeTy. Sliding
+  // the whole pupil makes the eye-follow motion visible at a glance.
+  const scleraW = EYE_SCLERA_X1 - EYE_SCLERA_X0 + 1;
+  const scleraH = EYE_SCLERA_Y1 - EYE_SCLERA_Y0 + 1;
+  const xRange = scleraW - EYE_PUPIL_FW;
+  const yRange = scleraH - EYE_PUPIL_FH;
+  const pupilCol = EYE_SCLERA_X0 + Math.ceil((eyeTx + 1) * 0.5 * xRange - 0.5);
+  const pupilRow = EYE_SCLERA_Y0 + Math.ceil((eyeTy + 1) * 0.5 * yRange - 0.5);
   const pupilColor = palette[4];
   if (pupilColor) {
     fill(pupilColor);
