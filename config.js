@@ -127,7 +127,10 @@ window.GROWLY_CONFIG = {
   bodySaturation: 78,    bodyLightness: 55,
   rimSaturation: 92,     rimLightness: 80,
   shadowSaturation: 75,  shadowLightness: 35,
-  eyeSaturation: 55,     eyeLightness: 12,
+  // Iris (palette[6]). Brighter than before so the dark movable pupil
+  // (palette[4], lightness 6) reads as a clear silhouette against it
+  // — without contrast the gaze motion is invisible.
+  eyeSaturation: 78,     eyeLightness: 32,
   // Eye-detail layers (only used by the fine-pixel template):
   outlineSaturation: 30, outlineLightness: 6,   // near-black eyelid line (palette index 4)
   scleraSaturation: 18,  scleraLightness: 92,   // off-white inside the outline (palette index 5)

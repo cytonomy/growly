@@ -263,6 +263,16 @@ function draw() {
   const dt = Math.min(100, now - lastDrawMs);
   lastDrawMs = now;
 
+  // AudioContext can transition to 'suspended' if the tab loses focus or
+  // the browser decides we've been idle. When suspended, getFloatTimeDomainData
+  // returns silence and Growly stops responding to audio entirely until the
+  // user clicks something. Poll once per draw and kick it back to 'running'
+  // — the resume() promise is fire-and-forget; we just want to recover
+  // automatically next time the user looks at the tab.
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+
   // Intensity: raw mic RMS × gain, GATED by the rhythm-presence signal so
   // broadband noise (plane airflow, HVAC, fan hum) — which has high RMS but
   // no rhythmic structure in its spectral flux — doesn't drive Growly. The
@@ -387,12 +397,17 @@ function draw() {
 }
 
 function drawHud() {
+  // Surface audio-context state so the "Growly stopped responding to
+  // sound" failure mode is diagnosable from the HUD alone. Anything other
+  // than "running" means rawLevel will be reading silence.
+  const audioState = audioCtx ? audioCtx.state : 'no ctx';
   const lines = [
     `BPM   ${micActive ? Math.round(detectedBpm) : '—'}`,
     `hue   ${Math.round(rgbToHsl(smoothedR, smoothedG, smoothedB).h)}°`,
     `level ${(displayLevel * 100).toFixed(0)}% (gate ${Math.round(rhythmPresence * 100)}%)`,
     `odf   ${odfSampleCount}/${cfg.odfBufferSize}`,
     `fps   ${(1000 / avgAnalysisDt).toFixed(0)}`,
+    `audio ${audioState}`,
   ];
   // In gaze mode, append a diagnostic line so the user can see whether
   // the iris signal is moving at all and how much of it survives the
@@ -779,23 +794,25 @@ function eyeBoxesFor(frame) {
 //   O  eyelid outline (palette[4], near-black)
 //   S  sclera        (palette[5], off-white)
 //   I  iris          (palette[6], saturated body hue)
-//   P  inner pupil   (palette[4], near-black)
-// Highlight (palette[7]) is painted on top, position movable inside the
-// pupil rect [rows 5-12, cols 3-5].
+//
+// The PUPIL is NOT baked into the template — it slides as a separate
+// 3w×5h block over the iris based on eyeTx/eyeTy, so the eye-follow
+// motion is visible across the whole pupil (not just a 1-cell highlight).
+// Highlight (palette[7]) rides along on the pupil's upper-left cell.
 const EYE_TEMPLATE = [
   '.OOOOOOO.',
   'OSSSSSSSO',
   'OSIIIIISO',
   'OSIIIIISO',
   'OSIIIIISO',
-  'OSIPPPISO',
-  'OSIPPPISO',
-  'OSIPPPISO',
-  'OSIPPPISO',
-  'OSIPPPISO',
-  'OSIPPPISO',
-  'OSIPPPISO',
-  'OSIPPPISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
+  'OSIIIIISO',
   'OSIIIIISO',
   'OSIIIIISO',
   'OSIIIIISO',
@@ -804,12 +821,14 @@ const EYE_TEMPLATE = [
 ];
 const EYE_TPL_W = 9;
 const EYE_TPL_H = 18;
-// Pupil rect inside the template — where the highlight can roam.
-// Rows 5..12 inclusive, cols 3..5 inclusive. (eyeTx/eyeTy = ±1 maps to
-// the edges of this rect; eyeTx=0 / eyeTy=0 lands near the center.)
-const EYE_PUPIL_X0 = 3, EYE_PUPIL_X1 = 5;
-const EYE_PUPIL_Y0 = 5, EYE_PUPIL_Y1 = 12;
-const EYE_CHAR_TO_IDX = { '.': 0, O: 4, S: 5, I: 6, P: 4 };
+// Iris rect inside the template — where the movable pupil can roam.
+// Rows 2..15 inclusive, cols 2..6 inclusive (5 cols × 14 rows of iris).
+const EYE_IRIS_X0 = 2, EYE_IRIS_X1 = 6;
+const EYE_IRIS_Y0 = 2, EYE_IRIS_Y1 = 15;
+// Movable pupil size in fine cells.
+const EYE_PUPIL_FW = 3;
+const EYE_PUPIL_FH = 5;
+const EYE_CHAR_TO_IDX = { '.': 0, O: 4, S: 5, I: 6 };
 
 // Render one detailed anime eye over a body-cell pupil bbox. Fine pixel
 // boundaries are integer-rounded so adjacent cells don't leave gaps when
@@ -838,36 +857,49 @@ function drawDetailedEye(b, eyeTx, eyeTy, palette, s, ox, oy) {
   }
   const baseX = ox + b.xLo * s;
   const baseY = oy + b.yLo * s;
-  // Render every fine cell of the template.
+  // Helper: integer-rounded fine-pixel rect.
+  function fineRect(tx, ty, tw, th) {
+    const x0 = Math.round(baseX + (tx * s) / hires);
+    const x1 = Math.round(baseX + ((tx + tw) * s) / hires);
+    const y0 = Math.round(baseY + (ty * s) / hires);
+    const y1 = Math.round(baseY + ((ty + th) * s) / hires);
+    rect(x0, y0, x1 - x0, y1 - y0);
+  }
+  // Pass A: render the static template (outline + sclera + iris).
   for (let ty = 0; ty < EYE_TPL_H; ty++) {
     const row = EYE_TEMPLATE[ty];
     if (!row) continue;
-    const y0 = Math.round(baseY + (ty * s) / hires);
-    const y1 = Math.round(baseY + ((ty + 1) * s) / hires);
     for (let tx = 0; tx < EYE_TPL_W; tx++) {
       const ch = row[tx];
       if (ch === '.') continue;
       const c = palette[EYE_CHAR_TO_IDX[ch]];
       if (!c) continue;
-      const x0 = Math.round(baseX + (tx * s) / hires);
-      const x1 = Math.round(baseX + ((tx + 1) * s) / hires);
       fill(c);
-      rect(x0, y0, x1 - x0, y1 - y0);
+      fineRect(tx, ty, 1, 1);
     }
   }
-  // Movable highlight inside the pupil rect.
+  // Pass B: the pupil — a movable EYE_PUPIL_FW × EYE_PUPIL_FH block that
+  // slides inside the iris based on eyeTx / eyeTy. Sliding the whole
+  // pupil (rather than only a 1-cell highlight) makes the eye-follow
+  // motion visible at a glance.
+  const irisW = EYE_IRIS_X1 - EYE_IRIS_X0 + 1;     // 5
+  const irisH = EYE_IRIS_Y1 - EYE_IRIS_Y0 + 1;     // 14
+  const xRange = irisW - EYE_PUPIL_FW;             // 2 — pupil-start cols 2..4
+  const yRange = irisH - EYE_PUPIL_FH;             // 9 — pupil-start rows 2..11
+  const pupilCol = EYE_IRIS_X0 + Math.ceil((eyeTx + 1) * 0.5 * xRange - 0.5);
+  const pupilRow = EYE_IRIS_Y0 + Math.ceil((eyeTy + 1) * 0.5 * yRange - 0.5);
+  const pupilColor = palette[4];
+  if (pupilColor) {
+    fill(pupilColor);
+    fineRect(pupilCol, pupilRow, EYE_PUPIL_FW, EYE_PUPIL_FH);
+  }
+  // Pass C: highlight — single fine cell glued to the upper-left of the
+  // pupil (anime sparkle convention). It rides along on the pupil so the
+  // gaze motion stays coherent.
   const hi = palette[7];
   if (hi) {
-    const pw = EYE_PUPIL_X1 - EYE_PUPIL_X0;   // 2 (3 cells wide → range 0..2)
-    const ph = EYE_PUPIL_Y1 - EYE_PUPIL_Y0;   // 7 (8 cells tall → range 0..7)
-    const tx = EYE_PUPIL_X0 + Math.ceil((eyeTx + 1) * 0.5 * pw - 0.5);
-    const ty = EYE_PUPIL_Y0 + Math.ceil((eyeTy + 1) * 0.5 * ph - 0.5);
-    const x0 = Math.round(baseX + (tx * s) / hires);
-    const x1 = Math.round(baseX + ((tx + 1) * s) / hires);
-    const y0 = Math.round(baseY + (ty * s) / hires);
-    const y1 = Math.round(baseY + ((ty + 1) * s) / hires);
     fill(hi);
-    rect(x0, y0, x1 - x0, y1 - y0);
+    fineRect(pupilCol + 1, pupilRow + 1, 1, 1);
   }
 }
 
