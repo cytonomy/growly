@@ -217,6 +217,7 @@ let silenceStartMs = 0;       // when the room first went quiet (0 = not silent)
 let audioCtx = null;
 let micStream = null;
 let micAnalyser = null;
+let micRestarting = false;     // guards against double re-acquire in flight
 let micBuffer = null;         // time-domain (RMS)
 let freqBuf = null;           // frequency-domain (centroid + ODF)
 let micActive = false;
@@ -271,6 +272,22 @@ function draw() {
   // automatically next time the user looks at the tab.
   if (audioCtx && audioCtx.state === 'suspended') {
     audioCtx.resume().catch(() => {});
+  }
+  // Heavier recovery: if the underlying mic track has ended (Chrome can
+  // drop it after long idle / device change), the audio context is
+  // healthy but getFloatTimeDomainData returns silence forever. Tear
+  // down and re-acquire when we detect this.
+  if (micStream) {
+    const track = micStream.getAudioTracks()[0];
+    if (track && track.readyState === 'ended' && !micRestarting) {
+      micRestarting = true;
+      console.warn('Growly mic: track ended — re-acquiring');
+      try { micStream.getTracks().forEach(t => t.stop()); } catch {}
+      micStream = null;
+      micAnalyser = null;
+      micActive = false;
+      ensureMicStarted().finally(() => { micRestarting = false; });
+    }
   }
 
   // Intensity: raw mic RMS × gain. The rhythm-presence gate (computed
@@ -611,13 +628,23 @@ function analyzeSpectrum(now) {
   // Debug surface — read in DevTools (or via Claude-in-Chrome) to see
   // why color / BPM is or isn't decaying. window.__growly is the only
   // sketch-internal state exposed; it intentionally has no setters.
+  const _track = micStream ? micStream.getAudioTracks()[0] : null;
   window.__growly = {
-    smoothedLevel,
-    rhythmPresence,
-    smoothedR, smoothedG, smoothedB,
-    detectedBpm,
+    smoothedLevel: +smoothedLevel.toFixed(3),
+    rhythmPresence: +rhythmPresence.toFixed(3),
+    smoothedR: +smoothedR.toFixed(2),
+    smoothedG: +smoothedG.toFixed(2),
+    smoothedB: +smoothedB.toFixed(2),
+    detectedBpm: Math.round(detectedBpm),
+    odfBufFill: odfSampleCount,
     audioState: audioCtx ? audioCtx.state : 'no ctx',
+    micTrack: _track ? {
+      readyState: _track.readyState,
+      muted: _track.muted,
+      enabled: _track.enabled,
+    } : 'no track',
     silenceMs: silenceStartMs ? (now - silenceStartMs) : 0,
+    tempoHistN: tempoEstimates.length,
   };
 }
 
