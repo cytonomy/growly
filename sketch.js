@@ -544,9 +544,13 @@ function analyzeSpectrum(now) {
   rhythmPresence += (presenceTarget - rhythmPresence) * cfg.rhythmPresenceSmoothing;
 
   // ---------- Periodic tempo estimation ----------
+  // Gate on rhythmPresence (not smoothedLevel). For slow / quiet music the
+  // level can dip below silenceResetIntensity between beats, but the ODF
+  // still has clear onset spikes — rhythm presence stays high and that's
+  // what we want as the "is there music?" signal for tempo estimation.
   const haveEnough = odfSampleCount >= cfg.odfWarmupFrames;
   const dueForUpdate = now - lastTempoEstMs >= cfg.bpmEstimateIntervalMs;
-  if (haveEnough && dueForUpdate && smoothedLevel >= cfg.silenceResetIntensity) {
+  if (haveEnough && dueForUpdate && rhythmPresence >= cfg.rhythmGateForColor) {
     lastTempoEstMs = now;
     const fps = 1000 / avgAnalysisDt;
     const { bpm: rawBpm, confidence } = estimateTempoFromOdf(fps);
@@ -584,12 +588,14 @@ function analyzeSpectrum(now) {
     }
   }
 
-  // Silence-based reset: drop the BPM lock when the room is genuinely
-  // quiet OR when the input has lost rhythmic structure. Mirrors the
-  // color gate above so the two stay in sync — once the user stops the
-  // music, both color and BPM disengage together.
-  const isSilent = smoothedLevel < cfg.silenceResetIntensity ||
-                   rhythmPresence < cfg.rhythmGateForColor;
+  // Silence-based reset: drive off rhythmPresence alone. Level is a
+  // bad signal for slow / quiet music (smoothedLevel can dip below the
+  // floor between beats even when the track is clearly playing), so
+  // mixing it in here was clobbering BPM during slow music. Pure noise
+  // and true silence both collapse rhythmPresence to ~0; legit music
+  // keeps it well above the gate. The 4-second timer below provides the
+  // hysteresis.
+  const isSilent = rhythmPresence < cfg.rhythmGateForColor;
   if (isSilent) {
     if (silenceStartMs === 0) silenceStartMs = now;
     if (now - silenceStartMs > cfg.silenceResetMs) {

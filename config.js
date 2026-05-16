@@ -69,8 +69,9 @@ window.GROWLY_CONFIG = {
   odfWarmupFrames: 32,            // start estimating once ~0.5s of onset data is buffered (analysis uses whatever slice is populated, not the full buffer)
   bpmEstimateIntervalMs: 400,
   bpmHistorySize: 24,
-  bpmPriorCenter: 110,
-  bpmPriorStd: 70,
+  bpmPriorCenter: 110,        // typical popular-music tempo — the prior pulls ambiguous estimates toward here
+
+  bpmPriorStd: 40,            // Gaussian spread on the prior. Tightened from 70 — at the old value the prior at 160 BPM was still 78% as strong as at 110, so comb-filter harmonic stacking would pick octave-doubled tempos. At 40, the 2× octave drops to ~28% prior, so it has to outscore the real tempo's comb by ~3.5× to win.
   bpmConfidenceThreshold: 3.2,    // first-pass: only commit clearly dominant peaks (raised to filter mic-noise-driven low-conf estimates)
   bpmFallback: 35,                // "no music" slow idle tempo
   bpmMin: 50,
