@@ -17,11 +17,14 @@ window.GROWLY_CONFIG = {
 
   // ----- Rhythm-presence gate -----
   // Distinguishes music (spiky onset pattern) from broadband noise (flat).
-  // The signal is std/mean of the ODF buffer; music sits ~0.8-2.0, white
-  // noise sits ~0.2-0.4. Below rhythmCvFloor → gate = 0, above
-  // rhythmCvCeiling → gate = 1, linear in between.
-  rhythmCvFloor: 0.55,
-  rhythmCvCeiling: 1.10,
+  // Signal is std/mean of the ODF buffer. The old tuning (floor 0.55,
+  // ceiling 1.10) assumed clean direct-from-file ODF where onsets are
+  // sharp. In a real listening setup the mic → speaker → mic chain
+  // smears those spikes into a continuously-varying spectrum: live
+  // measurement shows music landing at CV ≈ 0.20-0.35, broadband room
+  // noise at CV ≈ 0.05-0.15. Floor lowered to match.
+  rhythmCvFloor: 0.15,
+  rhythmCvCeiling: 0.40,
   rhythmPresenceSmoothing: 0.04,
   fftSize: 2048,
 
