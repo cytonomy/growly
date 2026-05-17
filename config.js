@@ -58,6 +58,7 @@ window.GROWLY_CONFIG = {
   // intensityThreshold. Bouncing is intentionally NOT gated on this, so
   // even non-rhythmic loud sound (someone talking) still moves Growly.
   rhythmGateForColor: 0.05,
+  rhythmPresenceReleaseSmoothing: 0.008,  // slow decay so a 1-2s sustained vocal note (flat ODF → CV drops momentarily) doesn't crash rhythm presence below the color gate. ~5x slower than the attack (rhythmPresenceSmoothing=0.04) — quick response when new rhythm arrives, ~10-15s tail when it leaves.
 
   // ----- BPM detection -----
   // Spectral-flux ODF + autocorrelation with comb filter + Gaussian prior

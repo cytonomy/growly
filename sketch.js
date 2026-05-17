@@ -561,7 +561,15 @@ function analyzeSpectrum(now) {
       presenceTarget = Math.max(0, Math.min(1, (cv - lo) / Math.max(0.01, hi - lo)));
     }
   }
-  rhythmPresence += (presenceTarget - rhythmPresence) * cfg.rhythmPresenceSmoothing;
+  // Asymmetric attack/release: rhythm presence climbs fast (so new
+  // music brings color in quickly) but decays slowly (so sustained vocal
+  // notes / flat-envelope passages don't briefly crash CV and flip color
+  // to ambient). The release is what stops the "blue flash during a
+  // held note" failure mode observed against atlast.wav.
+  const alpha = presenceTarget > rhythmPresence
+    ? cfg.rhythmPresenceSmoothing      // attack (0.04)
+    : cfg.rhythmPresenceReleaseSmoothing; // release (much slower)
+  rhythmPresence += (presenceTarget - rhythmPresence) * alpha;
 
   // ---------- Periodic tempo estimation ----------
   // Gate on rhythmPresence (not smoothedLevel). For slow / quiet music the
