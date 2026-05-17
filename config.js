@@ -69,10 +69,9 @@ window.GROWLY_CONFIG = {
   odfWarmupFrames: 32,            // start estimating once ~0.5s of onset data is buffered (analysis uses whatever slice is populated, not the full buffer)
   bpmEstimateIntervalMs: 400,
   bpmHistorySize: 24,
-  bpmPriorCenter: 110,        // typical popular-music tempo — the prior pulls ambiguous estimates toward here
-
-  bpmPriorStd: 40,            // Gaussian spread on the prior. Tightened from 70 — at the old value the prior at 160 BPM was still 78% as strong as at 110, so comb-filter harmonic stacking would pick octave-doubled tempos. At 40, the 2× octave drops to ~28% prior, so it has to outscore the real tempo's comb by ~3.5× to win.
-  bpmConfidenceThreshold: 3.2,    // first-pass: only commit clearly dominant peaks (raised to filter mic-noise-driven low-conf estimates)
+  bpmPriorCenter: 95,         // shifted down from 110: pop tempos cluster around 90-130, ballads/indie around 70-100, and the down-shift makes the prior favor the lower-half-octave when the comb is ambiguous between L and L/2.
+  bpmPriorStd: 35,            // Gaussian spread on the prior. With center=95 and std=35: prior(87) = 0.97, prior(140) = 0.21, prior(170) = 0.018. A 2× octave error from a real-87 track now needs ~4.6× stronger comb to win.
+  bpmConfidenceThreshold: 2.5,    // first-pass commit threshold. Lowered from 3.2 — sparse-rhythm tracks (slow ballads, indie) produce confidence in the 1.5-3.0 range, and at 3.2 most legitimate estimates were rejected, leaving the lock stuck wherever it first landed.
   bpmFallback: 35,                // "no music" slow idle tempo
   bpmMin: 50,
   bpmMax: 180,
@@ -84,8 +83,8 @@ window.GROWLY_CONFIG = {
   // existing lock — protects against a single bridge / bar where the
   // algorithm latches onto a syncopated harmonic.
   bpmOutlierTolerance: 0.15,
-  bpmOutlierConfirmations: 15,         // ~6s of contiguous outliers required to flush — was 30, but with the higher intensityThreshold the silence-reset between songs now releases the lock cleanly, so we don't need the longer guard
-  bpmOutlierStabilityStdMax: 8,        // …and they must agree (std < this BPM) — random noise spikes vary too much to pass
+  bpmOutlierConfirmations: 7,          // ~3s of contiguous outliers to flush the lock. Lowered from 15 — sparse-rhythm tracks oscillate enough that 15 same-direction estimates was too strict and the lock never updated.
+  bpmOutlierStabilityStdMax: 14,       // …and they must cluster (std < this BPM). Raised from 8 — sparse-rhythm clusters spread to ~10-12 BPM std even when centered correctly.
   // Silence-based reset. If the smoothed mic level stays below
   // intensityThreshold for this long, we drop the lock and revert to
   // bpmFallback. This is the only thing that resets the tempo — silence
