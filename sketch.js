@@ -480,11 +480,14 @@ function analyzeSpectrum(now) {
   let targetR = cfg.ambientRgb[0];
   let targetG = cfg.ambientRgb[1];
   let targetB = cfg.ambientRgb[2];
-  // Music-driven color only if BOTH (a) the level is above the silence
-  // threshold and (b) the ODF shows rhythmic structure. Background room
-  // noise can clear (a) but never (b) — gating on (b) too is what stops
-  // an idle room from parking the hue on yellow.
-  if (smoothedLevel >= cfg.intensityThreshold && rhythmPresence >= cfg.rhythmGateForColor) {
+  // Music-driven color is gated on rhythm-presence (the ODF CV signal),
+  // not on the raw level. Empirically smoothedLevel can dip below
+  // intensityThreshold for stretches during legit music (quieter
+  // sections, mic distance variation, breathing-period dips of the EMA)
+  // while rhythm-presence stays clearly high. The tiny level floor is
+  // a safety against mic-dead / 0-input scenarios — anything above
+  // background floor passes.
+  if (rhythmPresence >= cfg.rhythmGateForColor && smoothedLevel >= 0.04) {
     const eB = bandEnergy(cfg.bandBassHz[0], cfg.bandBassHz[1]) * cfg.bandBassGain;
     const eM = bandEnergy(cfg.bandMidHz[0], cfg.bandMidHz[1])   * cfg.bandMidGain;
     const eH = bandEnergy(cfg.bandHighHz[0], cfg.bandHighHz[1]) * cfg.bandHighGain;
