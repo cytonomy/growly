@@ -545,22 +545,23 @@ function analyzeSpectrum(now) {
   // animation on this ratio so noise can't drive the bounce.
   const presN = Math.min(odfSampleCount, odfBuffer.length);
   let presenceTarget = 0;
+  let _odfMean = 0, _odfCv = 0;
   if (presN >= 16) {
-    let m = 0;
-    for (let i = 0; i < presN; i++) m += odfBuffer[i];
-    m /= presN;
-    if (m > 0.5) {
+    for (let i = 0; i < presN; i++) _odfMean += odfBuffer[i];
+    _odfMean /= presN;
+    if (_odfMean > 0.5) {
       let v = 0;
       for (let i = 0; i < presN; i++) {
-        const d = odfBuffer[i] - m;
+        const d = odfBuffer[i] - _odfMean;
         v += d * d;
       }
       v /= presN;
-      const cv = Math.sqrt(v) / m;
+      _odfCv = Math.sqrt(v) / _odfMean;
       const lo = cfg.rhythmCvFloor, hi = cfg.rhythmCvCeiling;
-      presenceTarget = Math.max(0, Math.min(1, (cv - lo) / Math.max(0.01, hi - lo)));
+      presenceTarget = Math.max(0, Math.min(1, (_odfCv - lo) / Math.max(0.01, hi - lo)));
     }
   }
+  window.__growlyOdf = { mean: _odfMean, cv: _odfCv, presenceTarget };
   // Asymmetric attack/release: rhythm presence climbs fast (so new
   // music brings color in quickly) but decays slowly (so sustained vocal
   // notes / flat-envelope passages don't briefly crash CV and flip color
