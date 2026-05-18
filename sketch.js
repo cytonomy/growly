@@ -7,6 +7,11 @@
 
 const cfg = window.GROWLY_CONFIG;
 
+// Diagnostic log helpers — silent unless cfg.debugConsole is true. Errors
+// always pass through.
+function dbg(...a)  { if (cfg.debugConsole) console.log(...a); }
+function dbgWarn(...a) { if (cfg.debugConsole) console.warn(...a); }
+
 const SPRITE_W = 24;
 const SPRITE_H = 24;
 
@@ -46,12 +51,8 @@ function paletteForRgb(r, g, b) {
     1: color(`hsl(${hi}, ${Math.round(cfg.bodySaturation * k)}%, ${cfg.bodyLightness}%)`),
     2: color(`hsl(${hi}, ${Math.round(cfg.rimSaturation * k)}%, ${cfg.rimLightness}%)`),
     3: color(`hsl(${hi}, ${Math.round(cfg.shadowSaturation * k)}%, ${cfg.shadowLightness}%)`),
-    // Eye-detail layers — only used by the fine-pixel template overlay.
-    // 4 = outline (eyelid line), 5 = sclera (white). The iris (6) and the
-    // movable highlight (7) are the same indices as before.
     4: color(`hsl(${hi}, ${Math.round(cfg.outlineSaturation * k)}%, ${cfg.outlineLightness}%)`),
     5: color(`hsl(${hi}, ${Math.round(cfg.scleraSaturation * k)}%, ${cfg.scleraLightness}%)`),
-    6: color(`hsl(${hi}, ${Math.round(cfg.eyeSaturation * k)}%, ${cfg.eyeLightness}%)`),
     7: color(`hsl(${hi}, ${Math.round(cfg.bodySaturation * k * 0.4)}%, 92%)`),  // near-white tinted highlight
   };
 }
@@ -202,6 +203,7 @@ let smoothedFaceVecY = 0;
 // Last raw gaze vector (before EMA) — used for the HUD diagnostic in
 // gaze mode so the user can see whether the iris signal is responsive.
 let lastGazeRaw = null;
+let _lastOdf = { mean: 0, cv: 0, presenceTarget: 0 };  // diagnostics only
 let detectedBpm = 0;          // smoothed tempo from autocorrelation
 let tempoEstimates = [];      // rolling buffer of recent raw BPM estimates
 let outlierCandidates = [];   // recent confident estimates that are far from the median
@@ -281,7 +283,7 @@ function draw() {
     const track = micStream.getAudioTracks()[0];
     if (track && track.readyState === 'ended' && !micRestarting) {
       micRestarting = true;
-      console.warn('Growly mic: track ended — re-acquiring');
+      dbgWarn('Growly mic: track ended — re-acquiring');
       try { micStream.getTracks().forEach(t => t.stop()); } catch {}
       micStream = null;
       micAnalyser = null;
@@ -373,7 +375,7 @@ function draw() {
   // L↔R sine wander on X only.
   let eyeTx = 0, eyeTy = 0;
   let targetTx = null, targetTy = null;
-  let smoothingAlpha = cfg.faceFollowSmoothing;
+  let smoothingAlpha = cfg.eyeTrackFaceSmoothing;
   if (faceTrackingActive && lastFaceLandmarks) {
     logIrisOnce(lastFaceLandmarks);
     if (trackingMode === 'gaze') {
@@ -381,7 +383,7 @@ function draw() {
       if (gv) {
         targetTx = gv.x;
         targetTy = gv.y;
-        smoothingAlpha = cfg.gazeSmoothing;
+        smoothingAlpha = cfg.eyeTrackGazeSmoothing;
         lastGazeRaw = gv;
       }
     } else {
@@ -389,7 +391,7 @@ function draw() {
       if (faceMid) {
         const faceCanvasX = (1 - faceMid.x) * width;
         const faceCanvasY = faceMid.y * height;
-        const dead = cfg.faceFollowDeadzone * Math.min(width, height);
+        const dead = cfg.eyeTrackFaceDeadzone * Math.min(width, height);
         targetTx = Math.max(-1, Math.min(1, (faceCanvasX - renderX) / dead));
         targetTy = Math.max(-1, Math.min(1, (faceCanvasY - renderY) / dead));
       }
@@ -397,12 +399,14 @@ function draw() {
   }
   if (targetTx !== null) {
     // EMA state is in normalized [-1, +1] units regardless of mode.
+    // No clamp here — targetTx/targetTy are already clamped at their
+    // computation sites, and drawSlime() re-clamps as a safety net.
     smoothedFaceVecX += (targetTx - smoothedFaceVecX) * smoothingAlpha;
     smoothedFaceVecY += (targetTy - smoothedFaceVecY) * smoothingAlpha;
-    eyeTx = Math.max(-1, Math.min(1, smoothedFaceVecX));
-    eyeTy = Math.max(-1, Math.min(1, smoothedFaceVecY));
+    eyeTx = smoothedFaceVecX;
+    eyeTy = smoothedFaceVecY;
   } else {
-    const eyePhase = (now / cfg.eyeShiftPeriodMs) * Math.PI * 2;
+    const eyePhase = (now / cfg.eyeIdlePeriodMs) * Math.PI * 2;
     eyeTx = Math.sin(eyePhase);
     eyeTy = 0;
     if (trackingMode === 'gaze') lastGazeRaw = null;
@@ -561,22 +565,21 @@ function analyzeSpectrum(now) {
       presenceTarget = Math.max(0, Math.min(1, (_odfCv - lo) / Math.max(0.01, hi - lo)));
     }
   }
-  window.__growlyOdf = { mean: _odfMean, cv: _odfCv, presenceTarget };
-  // Asymmetric attack/release: rhythm presence climbs fast (so new
-  // music brings color in quickly) but decays slowly (so sustained vocal
-  // notes / flat-envelope passages don't briefly crash CV and flip color
-  // to ambient). The release is what stops the "blue flash during a
-  // held note" failure mode observed against atlast.wav.
+  // Asymmetric attack/release on rhythm presence: fast attack so new
+  // music brings color in quickly, slow release so a sustained vocal
+  // note (flat envelope → momentary CV dip) doesn't crash presence
+  // below the gate and flicker the color blue.
   const alpha = presenceTarget > rhythmPresence
-    ? cfg.rhythmPresenceSmoothing      // attack (0.04)
-    : cfg.rhythmPresenceReleaseSmoothing; // release (much slower)
+    ? cfg.rhythmPresenceSmoothing
+    : cfg.rhythmPresenceReleaseSmoothing;
   rhythmPresence += (presenceTarget - rhythmPresence) * alpha;
+  // Stash raw ODF stats for window.__growly diagnostics (assembled below).
+  _lastOdf = { mean: _odfMean, cv: _odfCv, presenceTarget };
 
   // ---------- Periodic tempo estimation ----------
-  // Gate on rhythmPresence (not smoothedLevel). For slow / quiet music the
-  // level can dip below silenceResetIntensity between beats, but the ODF
-  // still has clear onset spikes — rhythm presence stays high and that's
-  // what we want as the "is there music?" signal for tempo estimation.
+  // Gate on rhythmPresence (not smoothedLevel) — the level signal is
+  // noisy on slow/quiet tracks and dips between beats even when rhythm
+  // is clearly present.
   const haveEnough = odfSampleCount >= cfg.odfWarmupFrames;
   const dueForUpdate = now - lastTempoEstMs >= cfg.bpmEstimateIntervalMs;
   if (haveEnough && dueForUpdate && rhythmPresence >= cfg.rhythmGateForColor) {
@@ -637,13 +640,15 @@ function analyzeSpectrum(now) {
     silenceStartMs = 0;
   }
 
-  // Debug surface — read in DevTools (or via Claude-in-Chrome) to see
-  // why color / BPM is or isn't decaying. window.__growly is the only
-  // sketch-internal state exposed; it intentionally has no setters.
+  // Debug surface — read in DevTools / Claude-in-Chrome to see what's
+  // happening. Read-only; no setters.
   const _track = micStream ? micStream.getAudioTracks()[0] : null;
   window.__growly = {
     smoothedLevel: +smoothedLevel.toFixed(3),
     rhythmPresence: +rhythmPresence.toFixed(3),
+    presenceTarget: +_lastOdf.presenceTarget.toFixed(3),
+    odfMean: +_lastOdf.mean.toFixed(1),
+    odfCv: +_lastOdf.cv.toFixed(3),
     smoothedR: +smoothedR.toFixed(2),
     smoothedG: +smoothedG.toFixed(2),
     smoothedB: +smoothedB.toFixed(2),
@@ -663,7 +668,10 @@ function analyzeSpectrum(now) {
 function medianOf(arr) {
   if (!arr || !arr.length) return 0;
   const sorted = arr.slice().sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
+  const mid = sorted.length >> 1;
+  return sorted.length & 1
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) * 0.5;
 }
 
 function stdDevOf(arr) {
@@ -899,27 +907,9 @@ const EYE_CHAR_TO_IDX = { '.': 0, O: 4, S: 5 };
 // boundaries are integer-rounded so adjacent cells don't leave gaps when
 // renderScale / eyeHires is non-integer.
 function drawDetailedEye(b, eyeTx, eyeTy, palette, s, ox, oy) {
+  // Template is hard-fixed to (pupil-cells-wide × eyeHires) × (pupil-cells-tall × eyeHires);
+  // with cfg.eyeHires=3 and 3×6 pupil bboxes that's the only valid combo.
   const hires = cfg.eyeHires;
-  // Verify template fits the bbox — otherwise dimensions are mismatched
-  // and we'd render at the wrong scale. Bail to a chunky fallback if so.
-  const bWcells = b.xHi - b.xLo + 1;
-  const bHcells = b.yHi - b.yLo + 1;
-  if (bWcells * hires !== EYE_TPL_W || bHcells * hires !== EYE_TPL_H) {
-    // Fallback: paint the iris as a single block at body scale + chunky
-    // highlight (the pre-detail behavior).
-    const w = b.xHi - b.xLo;
-    const h = b.yHi - b.yLo;
-    fill(palette[6]);
-    rect(ox + b.xLo * s, oy + b.yLo * s, (w + 1) * s, (h + 1) * s);
-    const hi = palette[7];
-    if (hi) {
-      const col = b.xLo + Math.ceil((eyeTx + 1) * 0.5 * w - 0.5);
-      const row = b.yLo + Math.ceil((eyeTy + 1) * 0.5 * h - 0.5);
-      fill(hi);
-      rect(ox + col * s, oy + row * s, s, s);
-    }
-    return;
-  }
   const baseX = ox + b.xLo * s;
   const baseY = oy + b.yLo * s;
   // Helper: integer-rounded fine-pixel rect.
@@ -1146,12 +1136,12 @@ async function ensureFaceTracker() {
   }
   faceMeshInitPromise = (async () => {
     try {
-      console.log('Growly face: requesting webcam…');
+      dbg('Growly face: requesting webcam…');
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 320, height: 240, facingMode: 'user' },
         audio: false,
       });
-      console.log('Growly face: webcam OK, attaching to <video>');
+      dbg('Growly face: webcam OK, attaching to <video>');
       faceVideo = document.createElement('video');
       faceVideo.style.display = 'none';
       faceVideo.playsInline = true;
@@ -1159,7 +1149,7 @@ async function ensureFaceTracker() {
       faceVideo.srcObject = stream;
       document.body.appendChild(faceVideo);
       await faceVideo.play();
-      console.log('Growly face: video playing; constructing FaceMesh');
+      dbg('Growly face: video playing; constructing FaceMesh');
 
       const mesh = new FaceMesh({
         locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
@@ -1191,9 +1181,9 @@ async function ensureFaceTracker() {
         }
         lastFaceLandmarks = best;
       });
-      console.log('Growly face: loading WASM + model…');
+      dbg('Growly face: loading WASM + model…');
       await mesh.initialize();
-      console.log('Growly face: ready');
+      dbg('Growly face: ready');
       faceMesh = mesh;
       return true;
     } catch (e) {
@@ -1218,7 +1208,7 @@ function facePumpStep() {
   facePumpInflight = true;
   const t0 = performance.now();
   faceMesh.send({ image: faceVideo })
-    .catch((e) => console.warn('Growly face send failed', e))
+    .catch((e) => dbgWarn('Growly face send failed', e))
     .finally(() => {
       facePumpInflight = false;
       if (!faceTrackingActive) return;
@@ -1303,8 +1293,8 @@ function irisGazeVector(lm) {
   // a deadzone the eyes twitch. After the deadzone, multiply by gain so
   // real eye movements (~30-40% of half-width at max look) peg Growly's
   // pupil at ±1.
-  const dz = cfg.gazeDeadzone;
-  const gain = cfg.gazeGain;
+  const dz = cfg.eyeTrackGazeDeadzone;
+  const gain = cfg.eyeTrackGazeGain;
   function pipe(t) {
     const a = Math.abs(t);
     if (a <= dz) return 0;
@@ -1328,8 +1318,8 @@ function logIrisOnce(lm) {
   if (__irisLogged || !lm) return;
   const has468 = !!lm[468];
   const has473 = !!lm[473];
-  console.log('Growly gaze: landmark count =', lm.length,
-              '| iris 468 =', has468, '| iris 473 =', has473);
+  dbg('Growly gaze: landmark count =', lm.length,
+      '| iris 468 =', has468, '| iris 473 =', has473);
   __irisLogged = true;
 }
 
